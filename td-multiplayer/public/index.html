@@ -50,7 +50,16 @@
   #connStatus.online { color: #7cd992; }
 
   .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
-  .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; }
+  .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
+  .flash-overlay {
+    position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
+    border-radius: 6px; background: rgba(255,0,0,0); pointer-events: none; z-index: 5;
+  }
+  .flash-overlay.active { animation: flashRed 0.5s ease-out; }
+  @keyframes flashRed {
+    0% { background: rgba(255,0,0,0.55); }
+    100% { background: rgba(255,0,0,0); }
+  }
   .lane-label { font-size: 12px; color: #aab3bd; margin-bottom: 6px; }
   canvas { display: block; background: #232a33; border-radius: 6px; }
   #myCanvas { cursor: pointer; }
@@ -172,10 +181,12 @@
     <div class="lane-block">
       <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
       <canvas id="myCanvas" width="680" height="160"></canvas>
+      <div class="flash-overlay" id="myFlash"></div>
     </div>
     <div class="lane-block">
       <div class="lane-label">🎯 Gegner-Verteidigung — hierhin schickst du Einheiten</div>
       <canvas id="oppCanvas" width="680" height="160"></canvas>
+      <div class="flash-overlay" id="oppFlash"></div>
     </div>
   </div>
 
@@ -268,6 +279,7 @@ function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LAN
 function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
 
 function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier); }
+function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier)); }
 function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
 
 // ── Rollen & Verbindung ──────────────────────────────────────────────────
@@ -279,6 +291,8 @@ let dtGlobal = 16;
 let lastTime = 0;
 let hostShownEnded = false; // nur Host: verhindert wiederholtes Öffnen des End-Overlays
 let countdownAccum = 0; // nur Host: Zähler für die Countdown-Sekunden
+let nextEntityId = 1; // nur Host: eindeutige IDs für Einheiten/Projektile (für Interpolation beim Gast)
+let prevState = null, prevStateTime = 0, stateTime = 0; // nur Gast: für flüssige Zwischenschritt-Animation
 
 // WICHTIG: Trage hier die Adresse deines Multiplayer-Servers ein (siehe Deployment-Anleitung).
 // Solange die Domain noch nicht läuft, kannst du hier auch die onrender.com-Adresse eintragen.
@@ -299,7 +313,7 @@ ws.addEventListener('message', (evt) => {
     enterGame();
     setMessage(`Raum "${roomCode}" erstellt. Teile den Code — sobald Spieler 2 beitritt und beide bereit sind, geht's los.`);
     requestAnimationFrame(hostLoop);
-    setInterval(hostBroadcast, 150);
+    setInterval(hostBroadcast, 50);
   } else if (data.type === 'join-failed') {
     setLobbyMsg(`Raum "${roomCode}" wurde noch nicht erstellt. Spieler 1 muss zuerst "Raum erstellen" klicken.`);
     roomCode = null;
@@ -314,7 +328,10 @@ ws.addEventListener('message', (evt) => {
     setMessage('Der Gegner hat die Verbindung getrennt.');
   } else if (data.type === 'state') {
     const wasEnded = state && state.phase === 'ended';
+    prevState = state;
+    prevStateTime = stateTime;
     state = data.payload;
+    stateTime = performance.now();
     setConnStatus(true);
     updateUIFromState();
     if (state.phase === 'ended' && !wasEnded) showEndOverlay();
@@ -392,7 +409,7 @@ function buildPalette() {
     block.className = 'unit-block'; block.id = 'unit-block-' + key;
     block.innerHTML = `
       <button class="send-btn" id="send-${key}">
-        <div class="name">${u.name} — ${u.cost} Gold</div>
+        <div class="name">${u.name} — <span id="send-${key}-cost">${u.cost}</span> Gold</div>
         <div class="sub" id="send-${key}-sub"></div>
       </button>
       <div class="unit-upg-row">
@@ -479,7 +496,9 @@ function sendUnit(key) {
   if (!state || state.phase !== 'playing') return;
   const u = UNIT_TYPES[key];
   const myGold = isHost ? state.p1Gold : state.p2Gold;
-  if (myGold < u.cost) { setMessage(`Nicht genug Gold für ${u.name}.`); return; }
+  const myTiers = isHost ? state.p1UnitTiers : state.p2UnitTiers;
+  const cost = unitSendCost(key, myTiers[key]);
+  if (myGold < cost) { setMessage(`Nicht genug Gold für ${u.name}.`); return; }
   if (!clientCanSend()) { setMessage(`Sende-Limit erreicht: max. ${SEND_LIMIT_COUNT} Einheiten pro ${SEND_LIMIT_WINDOW_MS/1000}s.`); return; }
   mySendTimes.push(Date.now());
   if (isHost) { hostSendUnit(key); }
@@ -615,23 +634,27 @@ function hostUpgradeUnit(key, forGuest) {
 function hostSendUnit(key, forGuest) {
   const u = UNIT_TYPES[key];
   if (forGuest) {
-    if (state.p2Gold < u.cost) return;
+    const tier = state.p2UnitTiers[key];
+    const cost = unitSendCost(key, tier);
+    if (state.p2Gold < cost) return;
     if (!canSend(state.p2SendTimes)) return;
-    state.p2Gold -= u.cost;
-    state.p1Gold += Math.floor(u.cost / 3); // p2 schickt Richtung p1
-    state.p2BonusIncome += sendIncomeBoost(u.cost);
+    state.p2Gold -= cost;
+    state.p1Gold += Math.floor(cost / 3); // p2 schickt Richtung p1
+    state.p2BonusIncome += sendIncomeBoost(cost);
     state.p2SendTimes.push(Date.now());
-    const hp = unitEffectiveHp(key, state.p2UnitTiers[key]);
-    state.unitsOnLaneP1.push({ hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+    const hp = unitEffectiveHp(key, tier);
+    state.unitsOnLaneP1.push({ id: nextEntityId++, hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
   } else {
-    if (state.p1Gold < u.cost) return;
+    const tier = state.p1UnitTiers[key];
+    const cost = unitSendCost(key, tier);
+    if (state.p1Gold < cost) return;
     if (!canSend(state.p1SendTimes)) return;
-    state.p1Gold -= u.cost;
-    state.p2Gold += Math.floor(u.cost / 3); // p1 schickt Richtung p2
-    state.p1BonusIncome += sendIncomeBoost(u.cost);
+    state.p1Gold -= cost;
+    state.p2Gold += Math.floor(cost / 3); // p1 schickt Richtung p2
+    state.p1BonusIncome += sendIncomeBoost(cost);
     state.p1SendTimes.push(Date.now());
-    const hp = unitEffectiveHp(key, state.p1UnitTiers[key]);
-    state.unitsOnLaneP2.push({ hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+    const hp = unitEffectiveHp(key, tier);
+    state.unitsOnLaneP2.push({ id: nextEntityId++, hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
   }
 }
 
@@ -651,7 +674,7 @@ function fireTowers(structures, units, projectiles) {
     });
     if (target) {
       t.cooldown = effectiveFireRate(t);
-      projectiles.push({ x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t), color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration });
+      projectiles.push({ id: nextEntityId++, x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t), color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration });
     }
   });
 }
@@ -757,11 +780,18 @@ function setConnStatus(online) {
 
 // ── UI-Aktualisierung & Zeichnen ─────────────────────────────────────────
 let lastPhase = null;
+let lastMyLives = null, lastOppLives = null;
+function triggerFlash(id) {
+  const el = document.getElementById(id);
+  el.classList.remove('active');
+  void el.offsetWidth; // Reflow erzwingen, damit die Animation bei schnellen Wiederholungen neu startet
+  el.classList.add('active');
+}
 function updateUIFromState() {
   if (!state) return;
 
   // Phasenwechsel behandeln
-  if (state.phase === 'ready' && lastPhase !== 'ready') myReadyLocal = false;
+  if (state.phase === 'ready' && lastPhase !== 'ready') { myReadyLocal = false; lastMyLives = null; lastOppLives = null; }
   lastPhase = state.phase;
 
   document.getElementById('readyScreen').style.display = state.phase === 'ready' ? 'block' : 'none';
@@ -786,6 +816,11 @@ function updateUIFromState() {
   const myLives = isHost ? state.p1Lives : state.p2Lives;
   const oppGold = isHost ? state.p2Gold : state.p1Gold;
   const oppLives = isHost ? state.p2Lives : state.p1Lives;
+
+  if (lastMyLives !== null && myLives < lastMyLives) triggerFlash('myFlash');
+  if (lastOppLives !== null && oppLives < lastOppLives) triggerFlash('oppFlash');
+  lastMyLives = myLives; lastOppLives = oppLives;
+
   const myStructs = isHost ? state.p1Structures : state.p2Structures;
   const myBonus = isHost ? state.p1BonusIncome : state.p2BonusIncome;
   const oppBonus = isHost ? state.p2BonusIncome : state.p1BonusIncome;
@@ -798,11 +833,12 @@ function updateUIFromState() {
   document.getElementById('oppIncome').textContent = (1 + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) + oppBonus).toFixed(1);
   BUILD_ORDER.forEach(key => { document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1'; });
   Object.keys(UNIT_TYPES).forEach(key => {
-    const u = UNIT_TYPES[key];
     const tier = myTiers[key];
     const hp = unitEffectiveHp(key, tier);
-    const reward = Math.floor(u.cost / 3);
-    document.getElementById('send-' + key).disabled = myGold < u.cost;
+    const sendCost = unitSendCost(key, tier);
+    const reward = Math.floor(sendCost / 3);
+    document.getElementById('send-' + key).disabled = myGold < sendCost;
+    document.getElementById('send-' + key + '-cost').textContent = sendCost;
     document.getElementById('send-' + key + '-sub').textContent = `${hp.toFixed(0)} HP, Gegner erhält +${reward} Gold`;
     const maxed = tier >= UNIT_MAX_TIER;
     document.getElementById('unit-' + key + '-tier').textContent = `Tier ${tier}/${UNIT_MAX_TIER}`;
@@ -845,16 +881,43 @@ function drawLane(ctx, structures, units, projectiles) {
   projectiles.forEach(p => { ctx.beginPath(); ctx.fillStyle = p.color; ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
   ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(LANE_W - 6, PATH_ROW * CELL, 6, CELL);
 }
+function interpolateList(prevList, currList, t) {
+  if (!prevList || !prevList.length) return currList;
+  const prevById = new Map();
+  prevList.forEach(e => { if (e.id !== undefined) prevById.set(e.id, e); });
+  return currList.map(e => {
+    const p = e.id !== undefined ? prevById.get(e.id) : undefined;
+    if (!p) return e; // neu aufgetaucht seit letztem Snapshot - kein Interpolieren möglich
+    return Object.assign({}, e, { x: p.x + (e.x - p.x) * t, y: p.y + (e.y - p.y) * t });
+  });
+}
+
 function draw() {
   if (!state) return;
   const myCtx = document.getElementById('myCanvas').getContext('2d');
   const oppCtx = document.getElementById('oppCanvas').getContext('2d');
+
+  let u1 = state.unitsOnLaneP1, u2 = state.unitsOnLaneP2;
+  let pr1 = state.projP1, pr2 = state.projP2;
+
+  // Der Gast bekommt den Zustand nur alle paar Millisekunden per Netzwerk,
+  // zeichnet aber mit 60fps - deshalb zwischen den letzten zwei Snapshots interpolieren,
+  // sonst "springen" Einheiten und wirken ruckelig.
+  if (!isHost && prevState) {
+    const span = Math.max(stateTime - prevStateTime, 30);
+    const t = Math.min(1, Math.max(0, (performance.now() - stateTime) / span));
+    u1 = interpolateList(prevState.unitsOnLaneP1, state.unitsOnLaneP1, t);
+    u2 = interpolateList(prevState.unitsOnLaneP2, state.unitsOnLaneP2, t);
+    pr1 = interpolateList(prevState.projP1, state.projP1, t);
+    pr2 = interpolateList(prevState.projP2, state.projP2, t);
+  }
+
   if (isHost) {
-    drawLane(myCtx, state.p1Structures, state.unitsOnLaneP1, state.projP1);
-    drawLane(oppCtx, state.p2Structures, state.unitsOnLaneP2, state.projP2);
+    drawLane(myCtx, state.p1Structures, u1, pr1);
+    drawLane(oppCtx, state.p2Structures, u2, pr2);
   } else {
-    drawLane(myCtx, state.p2Structures, state.unitsOnLaneP2, state.projP2);
-    drawLane(oppCtx, state.p1Structures, state.unitsOnLaneP1, state.projP1);
+    drawLane(myCtx, state.p2Structures, u2, pr2);
+    drawLane(oppCtx, state.p1Structures, u1, pr1);
   }
 }
 
