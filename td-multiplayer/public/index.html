@@ -38,6 +38,20 @@
   #lobby .btn-join { background: var(--accent); color: #1a1200; }
   #lobbyMsg { font-size: 12px; color: #aab3bd; min-height: 32px; margin-top: 8px; }
 
+  #openRoomsSection { margin-top: 18px; padding-top: 14px; border-top: 1px solid #2c333c; text-align: left; }
+  #openRoomsList { max-height: 220px; overflow-y: auto; }
+  .rooms-empty { font-size: 12px; color: #aab3bd; text-align: center; padding: 10px 0; }
+  .room-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; margin-bottom: 6px; background: #232b34; border-radius: 8px;
+  }
+  .room-row .room-code { font-weight: 700; font-size: 13px; }
+  .room-row .room-players { font-size: 12px; color: #aab3bd; }
+  .room-row button {
+    padding: 5px 12px; border: none; border-radius: 6px; font-weight: 700;
+    font-size: 12px; cursor: pointer; background: var(--accent2); color: #04201d;
+  }
+
   #game { display: none; flex-direction: column; align-items: center; width: 100%; }
 
   .stat-bars { display: flex; gap: 12px; margin-bottom: 12px; width: 100%; max-width: 720px; }
@@ -154,6 +168,11 @@
   <button class="btn-host" onclick="hostRoom()">Raum erstellen (Spieler 1)</button>
   <button class="btn-join" onclick="joinRoom()">Raum beitreten (Spieler 2)</button>
   <div id="lobbyMsg">Einer von euch klickt "Raum erstellen", teilt den Code, der/die andere klickt "Raum beitreten" mit demselben Code.</div>
+
+  <div id="openRoomsSection">
+    <h3>Offene Räume</h3>
+    <div id="openRoomsList"><div class="rooms-empty">Suche offene Räume…</div></div>
+  </div>
 </div>
 
 <div id="game">
@@ -303,21 +322,28 @@ let prevState = null, prevStateTime = 0, stateTime = 0; // nur Gast: für flüss
 const WS_SERVER_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
 
 const ws = new WebSocket(WS_SERVER_URL);
-ws.addEventListener('open', () => setLobbyMsg('Verbunden mit Server. Raum-Code eingeben und loslegen.'));
+let roomsPollTimer = null;
+ws.addEventListener('open', () => {
+  setLobbyMsg('Verbunden mit Server. Raum-Code eingeben und loslegen.');
+  refreshRoomsList();
+  roomsPollTimer = setInterval(refreshRoomsList, 2000);
+});
 ws.addEventListener('close', () => setLobbyMsg('Verbindung zum Server verloren. Seite neu laden.'));
 ws.addEventListener('message', (evt) => {
   let data;
   try { data = JSON.parse(evt.data); } catch (e) { return; }
 
   if (data.type === 'hosted') {
+    stopRoomsPolling();
     enterGame();
     setMessage(`Raum "${roomCode}" erstellt. Teile den Code — sobald Spieler 2 beitritt und beide bereit sind, geht's los.`);
     requestAnimationFrame(hostLoop);
-    setInterval(hostBroadcast, 50);
+    setInterval(hostBroadcast, 70);
   } else if (data.type === 'join-failed') {
     setLobbyMsg(`Raum "${roomCode}" wurde noch nicht erstellt. Spieler 1 muss zuerst "Raum erstellen" klicken.`);
     roomCode = null;
   } else if (data.type === 'joined') {
+    stopRoomsPolling();
     enterGame();
     setMessage('Verbunden! Beide auf "Bereit" klicken, um zu starten.');
     requestAnimationFrame(guestRenderLoop);
@@ -326,6 +352,8 @@ ws.addEventListener('message', (evt) => {
   } else if (data.type === 'opponent-left') {
     setConnStatus(false);
     setMessage('Der Gegner hat die Verbindung getrennt.');
+  } else if (data.type === 'rooms-list') {
+    renderRoomsList(data.rooms || []);
   } else if (data.type === 'state') {
     const wasEnded = state && state.phase === 'ended';
     prevState = state;
@@ -333,7 +361,6 @@ ws.addEventListener('message', (evt) => {
     state = data.payload;
     stateTime = performance.now();
     setConnStatus(true);
-    updateUIFromState();
     if (state.phase === 'ended' && !wasEnded) showEndOverlay();
     if (state.phase !== 'ended') hideEndOverlay();
   } else if (data.type === 'action' && isHost) {
@@ -379,6 +406,28 @@ function joinRoom() {
 }
 
 function setLobbyMsg(msg) { document.getElementById('lobbyMsg').textContent = msg; }
+
+function refreshRoomsList() {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'list-rooms' }));
+}
+function stopRoomsPolling() {
+  if (roomsPollTimer) { clearInterval(roomsPollTimer); roomsPollTimer = null; }
+}
+function renderRoomsList(rooms) {
+  const listEl = document.getElementById('openRoomsList');
+  if (!rooms.length) { listEl.innerHTML = '<div class="rooms-empty">Gerade keine offenen Räume. Erstelle selbst einen!</div>'; return; }
+  listEl.innerHTML = rooms.map(r => `
+    <div class="room-row">
+      <span class="room-code">${r.code}</span>
+      <span class="room-players">${r.playerCount}/2 Spieler</span>
+      <button onclick="joinRoomFromList('${r.code}')">Beitreten</button>
+    </div>`).join('');
+}
+function joinRoomFromList(code) {
+  document.getElementById('roomCodeInput').value = code;
+  roomCode = code; myRole = 'p2'; isHost = false;
+  ws.send(JSON.stringify({ type: 'join', room: code }));
+}
 
 function enterGame() {
   document.getElementById('lobby').style.display = 'none';
@@ -765,10 +814,11 @@ function applyHostAction(a) {
   else if (a.type === 'rematch') hostRematch();
 }
 
-// ── Gast: nur zeichnen, Zustand kommt per WebSocket-Push ─────────────────
+// ── Gast: zeichnen + UI-Sync im eigenen Animationstakt (nicht bei jeder Netzwerknachricht) ──
 function guestRenderLoop(ts) {
   const dt = ts - lastTime; lastTime = ts;
   draw();
+  updateUIFromState();
   requestAnimationFrame(guestRenderLoop);
 }
 
