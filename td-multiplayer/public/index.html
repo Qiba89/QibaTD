@@ -2,13 +2,16 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Tower Defense — Multiplayer</title>
 <style>
   :root {
     --bg: #12161c; --panel: #1b2129; --accent: #ff9f43; --accent2: #4fd1c5;
     --danger: #ff5e5e; --text: #e8ecf1;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; touch-action: manipulation; }
+  html, body { touch-action: manipulation; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: 'Segoe UI', system-ui, sans-serif;
@@ -76,6 +79,15 @@
   button.send-btn:hover { border-color: var(--accent); }
   button.send-btn .name { font-weight: 600; }
   button.send-btn .sub { font-size: 11px; color: #aab3bd; }
+  .unit-block { margin-bottom: 8px; }
+  .unit-block .send-btn { margin-bottom: 4px; }
+  .unit-upg-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 0 2px; }
+  .unit-upg-row .tier-label { font-size: 11px; color: #aab3bd; }
+  .unit-upg-btn {
+    padding: 4px 8px; border: 2px solid #2c333c; border-radius: 6px;
+    background: #1b2129; color: var(--accent2); font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+  .unit-upg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   #towerInfo {
     background: #10151b; border: 1px solid #2c333c; border-radius: 8px;
@@ -101,6 +113,26 @@
   #overlay h2 { font-size: 32px; margin-bottom: 8px; }
   #overlay p { color: #aab3bd; margin-bottom: 20px; }
   #overlay button { width: 200px; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #1a1200; font-weight: 700; cursor: pointer; font-size: 14px; }
+  #readyScreen {
+    background: var(--panel); border: 1px solid #2c333c; border-radius: 10px;
+    padding: 24px; width: 320px; text-align: center; margin-bottom: 14px;
+  }
+  #readyScreen .ready-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+  #readyScreen .ready-row .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #2a323c; color: #aab3bd; }
+  #readyScreen .ready-row .tag.yes { background: #234a34; color: #7cd992; }
+  #readyBtn {
+    width: 100%; padding: 12px; margin-top: 10px; border: none; border-radius: 8px;
+    font-weight: 700; cursor: pointer; font-size: 14px; background: var(--accent2); color: #04201d;
+  }
+  #readyBtn.active { background: #2a323c; color: var(--text); }
+
+  #countdownOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center; z-index: 15;
+  }
+  #countdownOverlay .num { font-size: 120px; font-weight: 800; color: var(--accent); }
+
+  #overlay .rematch-status { font-size: 12px; color: #aab3bd; margin-top: 10px; min-height: 18px; }
 </style>
 </head>
 <body>
@@ -117,6 +149,14 @@
 
 <div id="game">
   <div id="connStatus">Verbinde…</div>
+
+  <div id="readyScreen" style="display:none;">
+    <h3>Bereit machen</h3>
+    <div class="ready-row"><span>Du</span><span class="tag" id="myReadyTag">nicht bereit</span></div>
+    <div class="ready-row"><span>Gegner</span><span class="tag" id="oppReadyTag">nicht bereit</span></div>
+    <button id="readyBtn" onclick="toggleReady()">Bereit ✅</button>
+  </div>
+
   <div class="stat-bars">
     <div class="stat-card mine">
       <span class="label" id="meLabel">DU</span>
@@ -128,7 +168,7 @@
     </div>
   </div>
 
-  <div class="lanes">
+  <div class="lanes" style="display:none;">
     <div class="lane-block">
       <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
       <canvas id="myCanvas" width="680" height="160"></canvas>
@@ -139,7 +179,7 @@
     </div>
   </div>
 
-  <div class="controls">
+  <div class="controls" style="display:none;">
     <div class="panel">
       <h3>Bauen (deine Seite)</h3>
       <div id="buildButtons"></div>
@@ -168,10 +208,13 @@
   <div id="message">Baue auf deiner Seite, schicke Einheiten zum Gegner.</div>
 </div>
 
+<div id="countdownOverlay"><div class="num" id="countdownNum">3</div></div>
+
 <div id="overlay">
   <h2 id="overlayTitle"></h2>
   <p id="overlayText"></p>
-  <button onclick="location.reload()">Neues Spiel</button>
+  <button onclick="requestRematch()">Neue Runde</button>
+  <div class="rematch-status" id="rematchStatus"></div>
 </div>
 
 <script>
@@ -201,6 +244,17 @@ const AS_GROWTH_PER_TIER = 0.15, AS_CAP_MULT = 2.2;
 const RANGE_GROWTH_PER_TIER = 1.05, RANGE_CAP_MULT = 1.2;
 const RADIUS_GROWTH_PER_TIER = 1.08, RADIUS_CAP_MULT = 1.35;
 
+// Einheiten-Upgrades: pro Stufe doppelt so stark (HP), aber 5x so teuer wie die vorige Stufe.
+// Gedeckelt bei Tier 3 (macht x8 HP für x125 der Basis-Kosten - alles darüber wird absurd teuer).
+const UNIT_MAX_TIER = 3;
+const UNIT_UPGRADE_COST_BASE = { sprinter: 30, standard: 75, brecher: 180 };
+const UNIT_HP_GROWTH_PER_TIER = 2;
+const UNIT_COST_GROWTH_PER_TIER = 5;
+
+// Sende-Limit: max. 20 Einheiten pro rollierendem 10-Sekunden-Fenster
+const SEND_LIMIT_COUNT = 20;
+const SEND_LIMIT_WINDOW_MS = 10000;
+
 function tierUpgradeCost(nextTier) { return Math.round(TIER_COST_BASE * Math.pow(TIER_COST_GROWTH, nextTier)); }
 function effectiveDamage(t) { const g = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE; return t.baseDamage * Math.pow(g, t.tier); }
 function effectiveFireRate(t) { const m = Math.min(1 + AS_GROWTH_PER_TIER * t.tier, AS_CAP_MULT); return t.baseFireRate / m; }
@@ -213,6 +267,9 @@ function cellCenter(c, r) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL 
 function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LANE_ROWS && r !== PATH_ROW; }
 function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
 
+function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier); }
+function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
+
 // ── Rollen & Verbindung ──────────────────────────────────────────────────
 let roomCode = null;
 let myRole = null; // 'p1' (Host) oder 'p2' (Gast)
@@ -220,7 +277,8 @@ let isHost = false;
 let state = null; // aktueller Spielzustand (Host: eigene Simulation; Gast: letzter empfangener Snapshot)
 let dtGlobal = 16;
 let lastTime = 0;
-let gameOver = false;
+let hostShownEnded = false; // nur Host: verhindert wiederholtes Öffnen des End-Overlays
+let countdownAccum = 0; // nur Host: Zähler für die Countdown-Sekunden
 
 // WICHTIG: Trage hier die Adresse deines Multiplayer-Servers ein (siehe Deployment-Anleitung).
 // Solange die Domain noch nicht läuft, kannst du hier auch die onrender.com-Adresse eintragen.
@@ -239,7 +297,7 @@ ws.addEventListener('message', (evt) => {
 
   if (data.type === 'hosted') {
     enterGame();
-    setMessage(`Raum "${roomCode}" erstellt. Teile den Code — sobald Spieler 2 beitritt, geht's los.`);
+    setMessage(`Raum "${roomCode}" erstellt. Teile den Code — sobald Spieler 2 beitritt und beide bereit sind, geht's los.`);
     requestAnimationFrame(hostLoop);
     setInterval(hostBroadcast, 150);
   } else if (data.type === 'join-failed') {
@@ -247,7 +305,7 @@ ws.addEventListener('message', (evt) => {
     roomCode = null;
   } else if (data.type === 'joined') {
     enterGame();
-    setMessage('Verbunden! Baue auf deiner Seite, schicke Einheiten zum Gegner.');
+    setMessage('Verbunden! Beide auf "Bereit" klicken, um zu starten.');
     requestAnimationFrame(guestRenderLoop);
   } else if (data.type === 'guest-joined') {
     setConnStatus(true);
@@ -255,10 +313,12 @@ ws.addEventListener('message', (evt) => {
     setConnStatus(false);
     setMessage('Der Gegner hat die Verbindung getrennt.');
   } else if (data.type === 'state') {
+    const wasEnded = state && state.phase === 'ended';
     state = data.payload;
     setConnStatus(true);
     updateUIFromState();
-    if (state.gameOver && !gameOver) showEndOverlay();
+    if (state.phase === 'ended' && !wasEnded) showEndOverlay();
+    if (state.phase !== 'ended') hideEndOverlay();
   } else if (data.type === 'action' && isHost) {
     applyHostAction(data.payload);
   }
@@ -266,15 +326,25 @@ ws.addEventListener('message', (evt) => {
 
 function freshState() {
   return {
+    phase: 'ready', // 'ready' -> 'countdown' -> 'playing' -> 'ended'
+    p1Ready: false, p2Ready: false, countdownValue: null,
     p1Gold: 100, p1Lives: 20, p2Gold: 100, p2Lives: 20,
     p1BonusIncome: 0, p2BonusIncome: 0, // wächst, wenn man Einheiten schickt
+    p1UnitTiers: { sprinter: 0, standard: 0, brecher: 0 },
+    p2UnitTiers: { sprinter: 0, standard: 0, brecher: 0 },
+    p1SendTimes: [], p2SendTimes: [], // Zeitstempel für das Sende-Limit
     p1Structures: [], p2Structures: [],
     unitsOnLaneP1: [], unitsOnLaneP2: [],
     projP1: [], projP2: [],
     gameOver: false, winner: null,
   };
 }
-function sendIncomeBoost(currentIncome) { return Math.max(1, Math.ceil(currentIncome * 0.10)); }
+function sendIncomeBoost(unitCost) { return Math.max(1, Math.ceil(unitCost * 0.10)); }
+function canSend(sendTimes) {
+  const now = Date.now();
+  while (sendTimes.length && now - sendTimes[0] > SEND_LIMIT_WINDOW_MS) sendTimes.shift();
+  return sendTimes.length < SEND_LIMIT_COUNT;
+}
 
 function hostRoom() {
   const code = (document.getElementById('roomCodeInput').value || '').trim().toUpperCase();
@@ -318,12 +388,20 @@ function buildPalette() {
   });
   const sendDiv = document.getElementById('sendButtons');
   Object.entries(UNIT_TYPES).forEach(([key, u]) => {
-    const btn = document.createElement('button');
-    btn.className = 'send-btn'; btn.id = 'send-' + key;
-    const reward = Math.floor(u.cost / 3);
-    btn.innerHTML = `<div class="name">${u.name} — ${u.cost} Gold</div><div class="sub">${u.hp} HP, Gegner erhält +${reward} Gold</div>`;
-    btn.onclick = () => sendUnit(key);
-    sendDiv.appendChild(btn);
+    const block = document.createElement('div');
+    block.className = 'unit-block'; block.id = 'unit-block-' + key;
+    block.innerHTML = `
+      <button class="send-btn" id="send-${key}">
+        <div class="name">${u.name} — ${u.cost} Gold</div>
+        <div class="sub" id="send-${key}-sub"></div>
+      </button>
+      <div class="unit-upg-row">
+        <span class="tier-label" id="unit-${key}-tier"></span>
+        <button class="unit-upg-btn" id="unit-upg-${key}"></button>
+      </div>`;
+    block.querySelector('.send-btn').onclick = () => sendUnit(key);
+    block.querySelector('.unit-upg-btn').onclick = () => upgradeUnit(key);
+    sendDiv.appendChild(block);
   });
 }
 
@@ -343,7 +421,7 @@ function setMessage(msg) { document.getElementById('message').textContent = msg;
 
 // ── Klick auf die eigene Spur ─────────────────────────────────────────
 document.getElementById('myCanvas').addEventListener('click', (e) => {
-  if (gameOver || !state) return;
+  if (!state || state.phase !== 'playing') return;
   const canvas = e.currentTarget;
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (canvas.width / rect.width);
@@ -391,13 +469,51 @@ function sellSelected() {
   else { queueAction({ type: 'sell', c: selectedStructure.c, r: selectedStructure.r }); }
   deselect();
 }
+let mySendTimes = []; // clientseitiger Spiegel des Sende-Limits, für sofortiges Feedback
+function clientCanSend() {
+  const now = Date.now();
+  while (mySendTimes.length && now - mySendTimes[0] > SEND_LIMIT_WINDOW_MS) mySendTimes.shift();
+  return mySendTimes.length < SEND_LIMIT_COUNT;
+}
 function sendUnit(key) {
+  if (!state || state.phase !== 'playing') return;
   const u = UNIT_TYPES[key];
   const myGold = isHost ? state.p1Gold : state.p2Gold;
   if (myGold < u.cost) { setMessage(`Nicht genug Gold für ${u.name}.`); return; }
+  if (!clientCanSend()) { setMessage(`Sende-Limit erreicht: max. ${SEND_LIMIT_COUNT} Einheiten pro ${SEND_LIMIT_WINDOW_MS/1000}s.`); return; }
+  mySendTimes.push(Date.now());
   if (isHost) { hostSendUnit(key); }
   else { queueAction({ type: 'send', unitType: key }); }
   setMessage(`${u.name} geschickt!`);
+}
+function upgradeUnit(key) {
+  if (!state || state.phase !== 'playing') return;
+  const tiers = isHost ? state.p1UnitTiers : state.p2UnitTiers;
+  if (tiers[key] >= UNIT_MAX_TIER) return;
+  const cost = unitUpgradeCost(key, tiers[key] + 1);
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  if (myGold < cost) { setMessage('Nicht genug Gold für Einheiten-Upgrade.'); return; }
+  if (isHost) { hostUpgradeUnit(key); }
+  else { queueAction({ type: 'upgradeUnit', unitType: key }); }
+}
+
+let myReadyLocal = false;
+function toggleReady() {
+  if (!state || state.phase !== 'ready') return;
+  myReadyLocal = !myReadyLocal;
+  if (isHost) { hostSetReady(myReadyLocal); }
+  else { queueAction({ type: 'ready', ready: myReadyLocal }); }
+  updateReadyUI();
+}
+function requestRematch() {
+  myReadyLocal = false;
+  if (isHost) { hostRematch(); }
+  else { queueAction({ type: 'rematch' }); }
+}
+function updateReadyUI() {
+  const btn = document.getElementById('readyBtn');
+  btn.textContent = myReadyLocal ? 'Bereit ✅ (klicken zum Zurücknehmen)' : 'Bereit ✅';
+  btn.classList.toggle('active', myReadyLocal);
 }
 
 function queueAction(action) {
@@ -480,22 +596,42 @@ function hostSetPriority(c, r, priority, forGuest) {
   const s = structs.find(x => x.c === c && x.r === r);
   if (s && s.type !== 'mine') s.priority = priority;
 }
+function hostSetReady(ready, forGuest) {
+  if (state.phase !== 'ready') return;
+  if (forGuest) state.p2Ready = ready; else state.p1Ready = ready;
+}
+function hostRematch() {
+  const fresh = freshState();
+  Object.assign(state, fresh);
+}
+function hostUpgradeUnit(key, forGuest) {
+  const tiers = forGuest ? state.p2UnitTiers : state.p1UnitTiers;
+  if (tiers[key] >= UNIT_MAX_TIER) return;
+  const cost = unitUpgradeCost(key, tiers[key] + 1);
+  if (forGuest) { if (state.p2Gold < cost) return; state.p2Gold -= cost; }
+  else { if (state.p1Gold < cost) return; state.p1Gold -= cost; }
+  tiers[key]++;
+}
 function hostSendUnit(key, forGuest) {
   const u = UNIT_TYPES[key];
   if (forGuest) {
     if (state.p2Gold < u.cost) return;
+    if (!canSend(state.p2SendTimes)) return;
     state.p2Gold -= u.cost;
     state.p1Gold += Math.floor(u.cost / 3); // p2 schickt Richtung p1
-    const boost = sendIncomeBoost(1 + mineIncomeTotal(state.p2Structures) + state.p2BonusIncome);
-    state.p2BonusIncome += boost;
-    state.unitsOnLaneP1.push({ hp: u.hp, maxHp: u.hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+    state.p2BonusIncome += sendIncomeBoost(u.cost);
+    state.p2SendTimes.push(Date.now());
+    const hp = unitEffectiveHp(key, state.p2UnitTiers[key]);
+    state.unitsOnLaneP1.push({ hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
   } else {
     if (state.p1Gold < u.cost) return;
+    if (!canSend(state.p1SendTimes)) return;
     state.p1Gold -= u.cost;
     state.p2Gold += Math.floor(u.cost / 3); // p1 schickt Richtung p2
-    const boost = sendIncomeBoost(1 + mineIncomeTotal(state.p1Structures) + state.p1BonusIncome);
-    state.p1BonusIncome += boost;
-    state.unitsOnLaneP2.push({ hp: u.hp, maxHp: u.hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+    state.p1BonusIncome += sendIncomeBoost(u.cost);
+    state.p1SendTimes.push(Date.now());
+    const hp = unitEffectiveHp(key, state.p1UnitTiers[key]);
+    state.unitsOnLaneP2.push({ hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
   }
 }
 
@@ -549,8 +685,28 @@ function moveProjectiles(projectiles, units) {
 }
 
 function hostUpdate(dt) {
-  if (state.gameOver) return;
   dtGlobal = dt;
+
+  if (state.phase === 'ready') {
+    if (state.p1Ready && state.p2Ready) {
+      state.phase = 'countdown';
+      state.countdownValue = 3;
+      countdownAccum = 0;
+    }
+    return;
+  }
+  if (state.phase === 'countdown') {
+    countdownAccum += dt;
+    if (countdownAccum >= 1000) {
+      countdownAccum -= 1000;
+      state.countdownValue--;
+      if (state.countdownValue <= 0) state.phase = 'playing';
+    }
+    return;
+  }
+  if (state.phase === 'ended') return;
+
+  // phase === 'playing'
   state.p1Gold += (1 + mineIncomeTotal(state.p1Structures) + state.p1BonusIncome) * dt / 1000;
   state.p2Gold += (1 + mineIncomeTotal(state.p2Structures) + state.p2BonusIncome) * dt / 1000;
   moveUnits(state.unitsOnLaneP1, () => { state.p1Lives--; if (state.p1Lives <= 0) hostEndGame('p2'); });
@@ -560,13 +716,16 @@ function hostUpdate(dt) {
   moveProjectiles(state.projP1, state.unitsOnLaneP1);
   moveProjectiles(state.projP2, state.unitsOnLaneP2);
 }
-function hostEndGame(winner) { state.gameOver = true; state.winner = winner; }
+function hostEndGame(winner) { state.gameOver = true; state.winner = winner; state.phase = 'ended'; }
 
 function hostLoop(ts) {
   const dt = ts - lastTime; lastTime = ts;
-  if (state) { hostUpdate(dt); draw(); updateUIFromState(); }
-  if (!(state && state.gameOver)) requestAnimationFrame(hostLoop);
-  else showEndOverlay();
+  if (state) {
+    hostUpdate(dt); draw(); updateUIFromState();
+    if (state.phase === 'ended' && !hostShownEnded) { hostShownEnded = true; showEndOverlay(); }
+    if (state.phase !== 'ended' && hostShownEnded) { hostShownEnded = false; hideEndOverlay(); }
+  }
+  requestAnimationFrame(hostLoop);
 }
 function hostBroadcast() {
   if (!state || ws.readyState !== WebSocket.OPEN) return;
@@ -578,13 +737,16 @@ function applyHostAction(a) {
   else if (a.type === 'sell') hostSell(a.c, a.r, true);
   else if (a.type === 'priority') hostSetPriority(a.c, a.r, a.priority, true);
   else if (a.type === 'send') hostSendUnit(a.unitType, true);
+  else if (a.type === 'upgradeUnit') hostUpgradeUnit(a.unitType, true);
+  else if (a.type === 'ready') hostSetReady(a.ready, true);
+  else if (a.type === 'rematch') hostRematch();
 }
 
 // ── Gast: nur zeichnen, Zustand kommt per WebSocket-Push ─────────────────
 function guestRenderLoop(ts) {
   const dt = ts - lastTime; lastTime = ts;
   draw();
-  if (!gameOver) requestAnimationFrame(guestRenderLoop);
+  requestAnimationFrame(guestRenderLoop);
 }
 
 function setConnStatus(online) {
@@ -594,8 +756,32 @@ function setConnStatus(online) {
 }
 
 // ── UI-Aktualisierung & Zeichnen ─────────────────────────────────────────
+let lastPhase = null;
 function updateUIFromState() {
   if (!state) return;
+
+  // Phasenwechsel behandeln
+  if (state.phase === 'ready' && lastPhase !== 'ready') myReadyLocal = false;
+  lastPhase = state.phase;
+
+  document.getElementById('readyScreen').style.display = state.phase === 'ready' ? 'block' : 'none';
+  document.getElementById('countdownOverlay').style.display = state.phase === 'countdown' ? 'flex' : 'none';
+  document.querySelector('.controls').style.display = state.phase === 'playing' ? 'flex' : 'none';
+  document.querySelector('.lanes').style.display = state.phase === 'ready' ? 'none' : 'flex';
+
+  if (state.phase === 'ready') {
+    const myR = isHost ? state.p1Ready : state.p2Ready;
+    const oppR = isHost ? state.p2Ready : state.p1Ready;
+    const myTag = document.getElementById('myReadyTag'), oppTag = document.getElementById('oppReadyTag');
+    myTag.textContent = myR ? 'bereit ✅' : 'nicht bereit'; myTag.classList.toggle('yes', myR);
+    oppTag.textContent = oppR ? 'bereit ✅' : 'nicht bereit'; oppTag.classList.toggle('yes', oppR);
+    updateReadyUI();
+  }
+  if (state.phase === 'countdown') {
+    document.getElementById('countdownNum').textContent = Math.max(1, state.countdownValue);
+  }
+  if (state.phase !== 'playing') return; // Wirtschaft/Bau-UI erst während des Spiels aktualisieren
+
   const myGold = isHost ? state.p1Gold : state.p2Gold;
   const myLives = isHost ? state.p1Lives : state.p2Lives;
   const oppGold = isHost ? state.p2Gold : state.p1Gold;
@@ -603,6 +789,7 @@ function updateUIFromState() {
   const myStructs = isHost ? state.p1Structures : state.p2Structures;
   const myBonus = isHost ? state.p1BonusIncome : state.p2BonusIncome;
   const oppBonus = isHost ? state.p2BonusIncome : state.p1BonusIncome;
+  const myTiers = isHost ? state.p1UnitTiers : state.p2UnitTiers;
   document.getElementById('myGold').textContent = Math.floor(myGold);
   document.getElementById('myLives').textContent = myLives;
   document.getElementById('oppGold').textContent = Math.floor(oppGold);
@@ -610,7 +797,23 @@ function updateUIFromState() {
   document.getElementById('myIncome').textContent = (1 + mineIncomeTotal(myStructs) + myBonus).toFixed(1);
   document.getElementById('oppIncome').textContent = (1 + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) + oppBonus).toFixed(1);
   BUILD_ORDER.forEach(key => { document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1'; });
-  Object.keys(UNIT_TYPES).forEach(key => { document.getElementById('send-' + key).disabled = myGold < UNIT_TYPES[key].cost; });
+  Object.keys(UNIT_TYPES).forEach(key => {
+    const u = UNIT_TYPES[key];
+    const tier = myTiers[key];
+    const hp = unitEffectiveHp(key, tier);
+    const reward = Math.floor(u.cost / 3);
+    document.getElementById('send-' + key).disabled = myGold < u.cost;
+    document.getElementById('send-' + key + '-sub').textContent = `${hp.toFixed(0)} HP, Gegner erhält +${reward} Gold`;
+    const maxed = tier >= UNIT_MAX_TIER;
+    document.getElementById('unit-' + key + '-tier').textContent = `Tier ${tier}/${UNIT_MAX_TIER}`;
+    const upgBtn = document.getElementById('unit-upg-' + key);
+    if (maxed) { upgBtn.textContent = 'MAX'; upgBtn.disabled = true; }
+    else {
+      const cost = unitUpgradeCost(key, tier + 1);
+      upgBtn.textContent = `⬆ ${cost} Gold`;
+      upgBtn.disabled = myGold < cost;
+    }
+  });
   if (selectedStructure) {
     const fresh = myStructs.find(s => s.c === selectedStructure.c && s.r === selectedStructure.r);
     selectedStructure = fresh || null;
@@ -656,11 +859,14 @@ function draw() {
 }
 
 function showEndOverlay() {
-  gameOver = true;
   const iWon = state.winner === myRole;
   document.getElementById('overlay').style.display = 'flex';
   document.getElementById('overlayTitle').textContent = iWon ? '🎉 Du hast gewonnen!' : '💀 Du hast verloren!';
   document.getElementById('overlayText').textContent = iWon ? 'Der Gegner hat keine Leben mehr.' : 'Du hast keine Leben mehr.';
+  document.getElementById('rematchStatus').textContent = '';
+}
+function hideEndOverlay() {
+  document.getElementById('overlay').style.display = 'none';
 }
 </script>
 </body>
