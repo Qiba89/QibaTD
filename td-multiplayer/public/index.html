@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Tower Defense — Multiplayer</title>
+<style>
+  :root {
+    --bg: #12161c; --panel: #1b2129; --accent: #ff9f43; --accent2: #4fd1c5;
+    --danger: #ff5e5e; --text: #e8ecf1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px; min-height: 100vh;
+  }
+  h1 { font-size: 20px; margin: 0 0 12px 0; color: var(--accent); }
+  h3 { margin: 0 0 8px 0; font-size: 14px; color: var(--accent2); }
+
+  #lobby {
+    background: var(--panel); border: 1px solid #2c333c; border-radius: 10px;
+    padding: 24px; width: 320px; text-align: center;
+  }
+  #lobby input {
+    width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 6px;
+    border: 1px solid #2c333c; background: #10151b; color: var(--text); font-size: 14px;
+    text-align: center; text-transform: uppercase;
+  }
+  #lobby button {
+    width: 100%; padding: 10px; margin-bottom: 8px; border: none; border-radius: 8px;
+    font-weight: 700; cursor: pointer; font-size: 14px;
+  }
+  #lobby .btn-host { background: var(--accent2); color: #04201d; }
+  #lobby .btn-join { background: var(--accent); color: #1a1200; }
+  #lobbyMsg { font-size: 12px; color: #aab3bd; min-height: 32px; margin-top: 8px; }
+
+  #game { display: none; flex-direction: column; align-items: center; width: 100%; }
+
+  .stat-bars { display: flex; gap: 12px; margin-bottom: 12px; width: 100%; max-width: 720px; }
+  .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
+  .stat-card.mine { border-color: var(--accent2); }
+  .stat-card.theirs { border-color: var(--accent); }
+  .stat-card b { color: var(--accent); }
+  .stat-card .label { font-size: 11px; color: #aab3bd; display: block; margin-bottom: 2px; }
+  #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
+  #connStatus.online { color: #7cd992; }
+
+  .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; }
+  .lane-label { font-size: 12px; color: #aab3bd; margin-bottom: 6px; }
+  canvas { display: block; background: #232a33; border-radius: 6px; }
+  #myCanvas { cursor: pointer; }
+  #oppCanvas { cursor: default; }
+
+  .controls { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .panel { background: var(--panel); border-radius: 10px; padding: 14px; width: 220px; border: 1px solid #2c333c; }
+
+  .pick-btn {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; margin-bottom: 8px;
+    background: #232b34; border: 2px solid transparent; border-radius: 8px;
+    color: var(--text); cursor: pointer; text-align: left; font-size: 13px;
+  }
+  .pick-btn:hover { border-color: var(--accent); }
+  .pick-btn.selected { border-color: var(--accent2); background: #2a3542; }
+  .pick-btn .swatch { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; }
+  .pick-btn .info { flex: 1; }
+  .pick-btn .name { font-weight: 600; }
+  .pick-btn .cost { color: var(--accent); font-size: 11px; }
+
+  button.send-btn {
+    width: 100%; padding: 8px 10px; margin-bottom: 8px; background: #232b34;
+    border: 2px solid transparent; border-radius: 8px; color: var(--text);
+    cursor: pointer; text-align: left; font-size: 13px;
+  }
+  button.send-btn:hover { border-color: var(--accent); }
+  button.send-btn .name { font-weight: 600; }
+  button.send-btn .sub { font-size: 11px; color: #aab3bd; }
+
+  #towerInfo {
+    background: #10151b; border: 1px solid #2c333c; border-radius: 8px;
+    padding: 10px; margin-top: 8px; font-size: 13px; display: none;
+  }
+  #towerInfo .ti-title { font-weight: 700; margin-bottom: 4px; color: var(--accent2); }
+  #towerInfo .ti-row { display: flex; justify-content: space-between; margin-bottom: 6px; color: #aab3bd; }
+  .ti-priority { display: flex; gap: 6px; margin-bottom: 8px; }
+  .prio-btn { flex: 1; padding: 6px 4px; border: 2px solid #2c333c; border-radius: 6px; background: #1b2129; color: #aab3bd; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .prio-btn.active { border-color: var(--accent2); background: #2a3542; color: var(--text); }
+  .ti-btns { display: flex; gap: 6px; }
+  #towerInfo button.action-btn { flex: 1; padding: 6px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 700; }
+  .ti-upgrade { background: var(--accent2); color: #04201d; }
+  .ti-sell { background: var(--danger); color: #2a0000; }
+  .ti-close { background: #2a323c; color: var(--text); flex: 0 0 30px; }
+
+  #message { margin-top: 10px; font-size: 13px; min-height: 20px; color: #aab3bd; max-width: 720px; text-align: center; }
+
+  #overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+    display: none; align-items: center; justify-content: center; flex-direction: column; z-index: 10;
+  }
+  #overlay h2 { font-size: 32px; margin-bottom: 8px; }
+  #overlay p { color: #aab3bd; margin-bottom: 20px; }
+  #overlay button { width: 200px; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: #1a1200; font-weight: 700; cursor: pointer; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>⚔️ TOWER DEFENSE — MULTIPLAYER</h1>
+
+<div id="lobby">
+  <h3>Raum beitreten</h3>
+  <input id="roomCodeInput" placeholder="Raum-Code, z.B. ABC123" maxlength="12">
+  <button class="btn-host" onclick="hostRoom()">Raum erstellen (Spieler 1)</button>
+  <button class="btn-join" onclick="joinRoom()">Raum beitreten (Spieler 2)</button>
+  <div id="lobbyMsg">Einer von euch klickt "Raum erstellen", teilt den Code, der/die andere klickt "Raum beitreten" mit demselben Code.</div>
+</div>
+
+<div id="game">
+  <div id="connStatus">Verbinde…</div>
+  <div class="stat-bars">
+    <div class="stat-card mine">
+      <span class="label" id="meLabel">DU</span>
+      ❤️ <b id="myLives">20</b> &nbsp; 💰 <b id="myGold">100</b> &nbsp; (+<span id="myIncome">1.0</span>/s)
+    </div>
+    <div class="stat-card theirs">
+      <span class="label" id="oppLabel">GEGNER</span>
+      ❤️ <b id="oppLives">20</b> &nbsp; 💰 <b id="oppGold">100</b> &nbsp; (+<span id="oppIncome">1.0</span>/s)
+    </div>
+  </div>
+
+  <div class="lanes">
+    <div class="lane-block">
+      <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
+      <canvas id="myCanvas" width="680" height="160"></canvas>
+    </div>
+    <div class="lane-block">
+      <div class="lane-label">🎯 Gegner-Verteidigung — hierhin schickst du Einheiten</div>
+      <canvas id="oppCanvas" width="680" height="160"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="panel">
+      <h3>Bauen (deine Seite)</h3>
+      <div id="buildButtons"></div>
+      <div id="towerInfo">
+        <div class="ti-title" id="tiTitle"></div>
+        <div class="ti-row" id="tiRow1"><span></span><span></span></div>
+        <div class="ti-row" id="tiRow2"><span></span><span></span></div>
+        <div class="ti-row" id="tiRow3"><span></span><span></span></div>
+        <div class="ti-priority" id="tiPriority">
+          <button class="prio-btn" id="prioFirstBtn" onclick="setSelectedPriority('first')">Erstes Ziel</button>
+          <button class="prio-btn" id="prioHpBtn" onclick="setSelectedPriority('hp')">Meiste HP</button>
+        </div>
+        <div class="ti-btns">
+          <button class="action-btn ti-upgrade" id="tiUpgradeBtn" onclick="upgradeSelected()"></button>
+          <button class="action-btn ti-sell" onclick="sellSelected()">Verkaufen</button>
+          <button class="action-btn ti-close" onclick="deselect()">✕</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Einheiten schicken</h3>
+      <div id="sendButtons"></div>
+    </div>
+  </div>
+
+  <div id="message">Baue auf deiner Seite, schicke Einheiten zum Gegner.</div>
+</div>
+
+<div id="overlay">
+  <h2 id="overlayTitle"></h2>
+  <p id="overlayText"></p>
+  <button onclick="location.reload()">Neues Spiel</button>
+</div>
+
+<script>
+// ── Geometrie & Definitionen (identisch zum Einzelspieler-PvP) ──────────
+const CELL = 40;
+const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
+const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
+const PATH_Y = PATH_ROW * CELL + CELL / 2;
+
+const TOWER_TYPES = {
+  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
+  cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45 },
+  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 550, slow: 0.5, slowDuration: 1500 },
+  mine:   { name: 'Mine',      cost: 60,  color: '#ffd166' },
+};
+const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'mine'];
+const UNIT_TYPES = {
+  sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 8 },
+  standard: { name: 'Standard', cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 10 },
+  brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 14 },
+};
+
+const TOWER_MAX_TIER = 4;
+const TIER_COST_BASE = 15, TIER_COST_GROWTH = 1.7;
+const DAMAGE_GROWTH_SINGLE = 1.40, AOE_DAMAGE_GROWTH = 1.25;
+const AS_GROWTH_PER_TIER = 0.15, AS_CAP_MULT = 2.2;
+const RANGE_GROWTH_PER_TIER = 1.05, RANGE_CAP_MULT = 1.2;
+const RADIUS_GROWTH_PER_TIER = 1.08, RADIUS_CAP_MULT = 1.35;
+
+function tierUpgradeCost(nextTier) { return Math.round(TIER_COST_BASE * Math.pow(TIER_COST_GROWTH, nextTier)); }
+function effectiveDamage(t) { const g = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE; return t.baseDamage * Math.pow(g, t.tier); }
+function effectiveFireRate(t) { const m = Math.min(1 + AS_GROWTH_PER_TIER * t.tier, AS_CAP_MULT); return t.baseFireRate / m; }
+function effectiveRange(t) { const m = Math.min(Math.pow(RANGE_GROWTH_PER_TIER, t.tier), RANGE_CAP_MULT); return t.baseRange * m; }
+function effectiveSplash(t) { if (!t.baseSplash) return 0; const m = Math.min(Math.pow(RADIUS_GROWTH_PER_TIER, t.tier), RADIUS_CAP_MULT); return t.baseSplash * m; }
+function mineIncome(t) { return 6 * Math.pow(1.5, t.tier); } // Basis zahlt sich in ~10s aus (60 Gold Kosten), je Tier x1.5
+
+function cellFromPixel(x, y) { return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) }; }
+function cellCenter(c, r) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 }; }
+function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LANE_ROWS && r !== PATH_ROW; }
+function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
+
+// ── Rollen & Verbindung ──────────────────────────────────────────────────
+let roomCode = null;
+let myRole = null; // 'p1' (Host) oder 'p2' (Gast)
+let isHost = false;
+let state = null; // aktueller Spielzustand (Host: eigene Simulation; Gast: letzter empfangener Snapshot)
+let dtGlobal = 16;
+let lastTime = 0;
+let gameOver = false;
+
+// WICHTIG: Trage hier die Adresse deines Multiplayer-Servers ein (siehe Deployment-Anleitung).
+// Solange die Domain noch nicht läuft, kannst du hier auch die onrender.com-Adresse eintragen.
+// Verbindet sich automatisch mit dem Server, der diese Seite ausliefert.
+// Falls du die Datei separat hostest (z.B. itch.io) und den Server woanders
+// laufen lässt, hier stattdessen die feste Adresse eintragen, z.B.:
+// const WS_SERVER_URL = 'wss://td-multiplayer-xxxx.onrender.com';
+const WS_SERVER_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+
+const ws = new WebSocket(WS_SERVER_URL);
+ws.addEventListener('open', () => setLobbyMsg('Verbunden mit Server. Raum-Code eingeben und loslegen.'));
+ws.addEventListener('close', () => setLobbyMsg('Verbindung zum Server verloren. Seite neu laden.'));
+ws.addEventListener('message', (evt) => {
+  let data;
+  try { data = JSON.parse(evt.data); } catch (e) { return; }
+
+  if (data.type === 'hosted') {
+    enterGame();
+    setMessage(`Raum "${roomCode}" erstellt. Teile den Code — sobald Spieler 2 beitritt, geht's los.`);
+    requestAnimationFrame(hostLoop);
+    setInterval(hostBroadcast, 150);
+  } else if (data.type === 'join-failed') {
+    setLobbyMsg(`Raum "${roomCode}" wurde noch nicht erstellt. Spieler 1 muss zuerst "Raum erstellen" klicken.`);
+    roomCode = null;
+  } else if (data.type === 'joined') {
+    enterGame();
+    setMessage('Verbunden! Baue auf deiner Seite, schicke Einheiten zum Gegner.');
+    requestAnimationFrame(guestRenderLoop);
+  } else if (data.type === 'guest-joined') {
+    setConnStatus(true);
+  } else if (data.type === 'opponent-left') {
+    setConnStatus(false);
+    setMessage('Der Gegner hat die Verbindung getrennt.');
+  } else if (data.type === 'state') {
+    state = data.payload;
+    setConnStatus(true);
+    updateUIFromState();
+    if (state.gameOver && !gameOver) showEndOverlay();
+  } else if (data.type === 'action' && isHost) {
+    applyHostAction(data.payload);
+  }
+});
+
+function freshState() {
+  return {
+    p1Gold: 100, p1Lives: 20, p2Gold: 100, p2Lives: 20,
+    p1BonusIncome: 0, p2BonusIncome: 0, // wächst, wenn man Einheiten schickt
+    p1Structures: [], p2Structures: [],
+    unitsOnLaneP1: [], unitsOnLaneP2: [],
+    projP1: [], projP2: [],
+    gameOver: false, winner: null,
+  };
+}
+function sendIncomeBoost(currentIncome) { return Math.max(1, Math.ceil(currentIncome * 0.10)); }
+
+function hostRoom() {
+  const code = (document.getElementById('roomCodeInput').value || '').trim().toUpperCase();
+  if (!code) { setLobbyMsg('Bitte einen Raum-Code eingeben.'); return; }
+  roomCode = code; myRole = 'p1'; isHost = true;
+  state = freshState();
+  ws.send(JSON.stringify({ type: 'host', room: roomCode }));
+}
+
+function joinRoom() {
+  const code = (document.getElementById('roomCodeInput').value || '').trim().toUpperCase();
+  if (!code) { setLobbyMsg('Bitte einen Raum-Code eingeben.'); return; }
+  roomCode = code; myRole = 'p2'; isHost = false;
+  ws.send(JSON.stringify({ type: 'join', room: roomCode }));
+}
+
+function setLobbyMsg(msg) { document.getElementById('lobbyMsg').textContent = msg; }
+
+function enterGame() {
+  document.getElementById('lobby').style.display = 'none';
+  document.getElementById('game').style.display = 'flex';
+  document.getElementById('meLabel').textContent = isHost ? 'DU (Spieler 1)' : 'DU (Spieler 2)';
+  document.getElementById('oppLabel').textContent = isHost ? 'GEGNER (Spieler 2)' : 'GEGNER (Spieler 1)';
+  setConnStatus(false);
+  buildPalette();
+  updateUIFromState();
+}
+
+// ── Bau-Palette & Sende-Palette (UI) ─────────────────────────────────────
+function buildPalette() {
+  const buildDiv = document.getElementById('buildButtons');
+  BUILD_ORDER.forEach(key => {
+    const t = TOWER_TYPES[key];
+    const btn = document.createElement('button');
+    btn.className = 'pick-btn'; btn.id = 'build-' + key;
+    const sub = key === 'mine' ? '+6 Gold/s' : `${t.damage} Dmg`;
+    btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
+      <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold — ${sub}</div></div>`;
+    btn.onclick = () => selectBuildType(key);
+    buildDiv.appendChild(btn);
+  });
+  const sendDiv = document.getElementById('sendButtons');
+  Object.entries(UNIT_TYPES).forEach(([key, u]) => {
+    const btn = document.createElement('button');
+    btn.className = 'send-btn'; btn.id = 'send-' + key;
+    const reward = Math.floor(u.cost / 3);
+    btn.innerHTML = `<div class="name">${u.name} — ${u.cost} Gold</div><div class="sub">${u.hp} HP, Gegner erhält +${reward} Gold</div>`;
+    btn.onclick = () => sendUnit(key);
+    sendDiv.appendChild(btn);
+  });
+}
+
+let selectedBuildType = null;
+let selectedStructure = null;
+
+function selectBuildType(key) {
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  if (myGold < TOWER_TYPES[key].cost) { setMessage(`Nicht genug Gold für ${TOWER_TYPES[key].name}.`); return; }
+  deselect();
+  selectedBuildType = (selectedBuildType === key) ? null : key;
+  document.querySelectorAll('.pick-btn').forEach(b => b.classList.remove('selected'));
+  if (selectedBuildType) document.getElementById('build-' + selectedBuildType).classList.add('selected');
+}
+
+function setMessage(msg) { document.getElementById('message').textContent = msg; }
+
+// ── Klick auf die eigene Spur ─────────────────────────────────────────
+document.getElementById('myCanvas').addEventListener('click', (e) => {
+  if (gameOver || !state) return;
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const { c, r } = cellFromPixel(x, y);
+  const myStructures = isHost ? state.p1Structures : state.p2Structures;
+  const existing = myStructures.find(s => s.c === c && s.r === r);
+
+  if (existing) {
+    selectedBuildType = null;
+    document.querySelectorAll('.pick-btn').forEach(b => b.classList.remove('selected'));
+    selectStructure(existing);
+    return;
+  }
+  if (selectedBuildType) {
+    if (!isBuildable(c, r)) { setMessage('Hier kann nichts gebaut werden (Weg).'); return; }
+    const type = TOWER_TYPES[selectedBuildType];
+    const myGold = isHost ? state.p1Gold : state.p2Gold;
+    if (myGold < type.cost) { setMessage('Nicht genug Gold.'); return; }
+    if (isHost) { hostBuild(selectedBuildType, c, r); }
+    else { queueAction({ type: 'build', buildType: selectedBuildType, c, r }); }
+    deselect();
+  }
+});
+
+function selectStructure(obj) { selectedStructure = obj; updateInfoPanel(); }
+function deselect() { selectedStructure = null; document.getElementById('towerInfo').style.display = 'none'; }
+function setSelectedPriority(p) {
+  if (!selectedStructure) return;
+  if (isHost) { selectedStructure.priority = p; }
+  else { queueAction({ type: 'priority', c: selectedStructure.c, r: selectedStructure.r, priority: p }); selectedStructure.priority = p; }
+  updateInfoPanel();
+}
+function upgradeSelected() {
+  if (!selectedStructure) return;
+  const cost = tierUpgradeCost(selectedStructure.tier + 1);
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  if (myGold < cost) { setMessage('Nicht genug Gold für Upgrade.'); return; }
+  if (isHost) { hostUpgrade(selectedStructure.c, selectedStructure.r); }
+  else { queueAction({ type: 'upgrade', c: selectedStructure.c, r: selectedStructure.r }); }
+}
+function sellSelected() {
+  if (!selectedStructure) return;
+  if (isHost) { hostSell(selectedStructure.c, selectedStructure.r); }
+  else { queueAction({ type: 'sell', c: selectedStructure.c, r: selectedStructure.r }); }
+  deselect();
+}
+function sendUnit(key) {
+  const u = UNIT_TYPES[key];
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  if (myGold < u.cost) { setMessage(`Nicht genug Gold für ${u.name}.`); return; }
+  if (isHost) { hostSendUnit(key); }
+  else { queueAction({ type: 'send', unitType: key }); }
+  setMessage(`${u.name} geschickt!`);
+}
+
+function queueAction(action) {
+  ws.send(JSON.stringify({ type: 'action', payload: action }));
+}
+
+function updateInfoPanel() {
+  const panel = document.getElementById('towerInfo');
+  if (!selectedStructure || !state) { panel.style.display = 'none'; return; }
+  const t = selectedStructure;
+  const isMine = t.type === 'mine';
+  const maxed = t.tier >= TOWER_MAX_TIER;
+  document.getElementById('tiTitle').textContent = `${TOWER_TYPES[t.type].name} (Tier ${t.tier}/${TOWER_MAX_TIER})`;
+  document.getElementById('tiPriority').style.display = isMine ? 'none' : 'flex';
+  if (!isMine) {
+    document.getElementById('prioFirstBtn').classList.toggle('active', t.priority !== 'hp');
+    document.getElementById('prioHpBtn').classList.toggle('active', t.priority === 'hp');
+  }
+  const row1 = document.getElementById('tiRow1'), row2 = document.getElementById('tiRow2'), row3 = document.getElementById('tiRow3');
+  if (isMine) {
+    row1.innerHTML = `<span>Einkommen</span><span>+${mineIncome(t)} Gold/s</span>`;
+    row2.innerHTML = ''; row3.innerHTML = '';
+  } else {
+    row1.innerHTML = `<span>Schaden</span><span>${effectiveDamage(t).toFixed(1)}</span>`;
+    row2.innerHTML = `<span>Feuerrate</span><span>${(1000 / effectiveFireRate(t)).toFixed(2)}/s</span>`;
+    row3.innerHTML = `<span>Reichweite</span><span>${Math.round(effectiveRange(t))}px${t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : ''}</span>`;
+  }
+  const upgradeBtn = document.getElementById('tiUpgradeBtn');
+  if (maxed) { upgradeBtn.textContent = 'Max. Tier erreicht'; upgradeBtn.disabled = true; }
+  else {
+    const cost = tierUpgradeCost(t.tier + 1);
+    const myGold = isHost ? state.p1Gold : state.p2Gold;
+    upgradeBtn.textContent = `Upgrade (${cost} Gold)`;
+    upgradeBtn.disabled = myGold < cost;
+  }
+  panel.style.display = 'block';
+}
+
+// ── Host: direkte Simulations-Operationen ────────────────────────────────
+function newStructure(key, c, r) {
+  const type = TOWER_TYPES[key];
+  const { x: cx, y: cy } = cellCenter(c, r);
+  const s = { c, r, x: cx, y: cy, type: key, cost: type.cost, tier: 0, cooldown: 0, color: type.color };
+  if (key !== 'mine') {
+    Object.assign(s, {
+      baseDamage: type.damage, baseFireRate: type.fireRate, baseRange: type.range,
+      baseSplash: type.splash || 0, projSpeed: type.projSpeed,
+      slow: type.slow, slowDuration: type.slowDuration, priority: 'first',
+    });
+  }
+  return s;
+}
+function hostBuild(key, c, r, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  if (structs.some(s => s.c === c && s.r === r) || !isBuildable(c, r)) return;
+  const type = TOWER_TYPES[key];
+  if (forGuest) { if (state.p2Gold < type.cost) return; state.p2Gold -= type.cost; }
+  else { if (state.p1Gold < type.cost) return; state.p1Gold -= type.cost; }
+  structs.push(newStructure(key, c, r));
+}
+function hostUpgrade(c, r, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  const s = structs.find(x => x.c === c && x.r === r);
+  if (!s || s.tier >= TOWER_MAX_TIER) return;
+  const cost = tierUpgradeCost(s.tier + 1);
+  if (forGuest) { if (state.p2Gold < cost) return; state.p2Gold -= cost; }
+  else { if (state.p1Gold < cost) return; state.p1Gold -= cost; }
+  s.tier++;
+}
+function hostSell(c, r, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  const s = structs.find(x => x.c === c && x.r === r);
+  if (!s) return;
+  const refund = Math.floor(s.cost * 0.6);
+  if (forGuest) { state.p2Gold += refund; state.p2Structures = state.p2Structures.filter(x => x !== s); }
+  else { state.p1Gold += refund; state.p1Structures = state.p1Structures.filter(x => x !== s); }
+}
+function hostSetPriority(c, r, priority, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  const s = structs.find(x => x.c === c && x.r === r);
+  if (s && s.type !== 'mine') s.priority = priority;
+}
+function hostSendUnit(key, forGuest) {
+  const u = UNIT_TYPES[key];
+  if (forGuest) {
+    if (state.p2Gold < u.cost) return;
+    state.p2Gold -= u.cost;
+    state.p1Gold += Math.floor(u.cost / 3); // p2 schickt Richtung p1
+    const boost = sendIncomeBoost(1 + mineIncomeTotal(state.p2Structures) + state.p2BonusIncome);
+    state.p2BonusIncome += boost;
+    state.unitsOnLaneP1.push({ hp: u.hp, maxHp: u.hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+  } else {
+    if (state.p1Gold < u.cost) return;
+    state.p1Gold -= u.cost;
+    state.p2Gold += Math.floor(u.cost / 3); // p1 schickt Richtung p2
+    const boost = sendIncomeBoost(1 + mineIncomeTotal(state.p1Structures) + state.p1BonusIncome);
+    state.p1BonusIncome += boost;
+    state.unitsOnLaneP2.push({ hp: u.hp, maxHp: u.hp, speed: u.speed, radius: u.radius, color: u.color, x: 0, y: PATH_Y, slowUntil: 0 });
+  }
+}
+
+// ── Host: Simulationsschritt (läuft nur beim Host) ──────────────────────
+function fireTowers(structures, units, projectiles) {
+  structures.forEach(t => {
+    if (t.type === 'mine') return;
+    t.cooldown -= dtGlobal;
+    if (t.cooldown > 0) return;
+    const effRange = effectiveRange(t);
+    let target = null, bestScore = -1;
+    units.forEach(u => {
+      const d = Math.hypot(u.x - t.x, u.y - t.y);
+      if (d > effRange) return;
+      const score = t.priority === 'hp' ? u.hp : u.x;
+      if (score > bestScore) { bestScore = score; target = u; }
+    });
+    if (target) {
+      t.cooldown = effectiveFireRate(t);
+      projectiles.push({ x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t), color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration });
+    }
+  });
+}
+function moveUnits(units, onReachEnd) {
+  const now = performance.now();
+  for (let i = units.length - 1; i >= 0; i--) {
+    const u = units[i];
+    let speed = u.speed;
+    if (now < u.slowUntil) speed *= 0.5;
+    u.x += speed * dtGlobal / 1000;
+    if (u.x >= LANE_W) { onReachEnd(); units.splice(i, 1); }
+  }
+}
+function damageUnit(u, dmg, units) {
+  u.hp -= dmg;
+  if (u.hp <= 0) { const idx = units.indexOf(u); if (idx >= 0) units.splice(idx, 1); }
+}
+function moveProjectiles(projectiles, units) {
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    if (!units.includes(p.target)) { projectiles.splice(i, 1); continue; }
+    const dx = p.target.x - p.x, dy = p.target.y - p.y;
+    const dist = Math.hypot(dx, dy);
+    const step = p.speed * dtGlobal / 1000;
+    if (dist < step + 5) {
+      if (p.splash) units.slice().forEach(u => { if (Math.hypot(u.x - p.target.x, u.y - p.target.y) <= p.splash) damageUnit(u, p.damage, units); });
+      else { damageUnit(p.target, p.damage, units); if (p.slow) p.target.slowUntil = performance.now() + p.slowDuration; }
+      projectiles.splice(i, 1);
+    } else { p.x += (dx / dist) * step; p.y += (dy / dist) * step; }
+  }
+}
+
+function hostUpdate(dt) {
+  if (state.gameOver) return;
+  dtGlobal = dt;
+  state.p1Gold += (1 + mineIncomeTotal(state.p1Structures) + state.p1BonusIncome) * dt / 1000;
+  state.p2Gold += (1 + mineIncomeTotal(state.p2Structures) + state.p2BonusIncome) * dt / 1000;
+  moveUnits(state.unitsOnLaneP1, () => { state.p1Lives--; if (state.p1Lives <= 0) hostEndGame('p2'); });
+  moveUnits(state.unitsOnLaneP2, () => { state.p2Lives--; if (state.p2Lives <= 0) hostEndGame('p1'); });
+  fireTowers(state.p1Structures, state.unitsOnLaneP1, state.projP1);
+  fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2);
+  moveProjectiles(state.projP1, state.unitsOnLaneP1);
+  moveProjectiles(state.projP2, state.unitsOnLaneP2);
+}
+function hostEndGame(winner) { state.gameOver = true; state.winner = winner; }
+
+function hostLoop(ts) {
+  const dt = ts - lastTime; lastTime = ts;
+  if (state) { hostUpdate(dt); draw(); updateUIFromState(); }
+  if (!(state && state.gameOver)) requestAnimationFrame(hostLoop);
+  else showEndOverlay();
+}
+function hostBroadcast() {
+  if (!state || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: 'state', payload: state }));
+}
+function applyHostAction(a) {
+  if (a.type === 'build') hostBuild(a.buildType, a.c, a.r, true);
+  else if (a.type === 'upgrade') hostUpgrade(a.c, a.r, true);
+  else if (a.type === 'sell') hostSell(a.c, a.r, true);
+  else if (a.type === 'priority') hostSetPriority(a.c, a.r, a.priority, true);
+  else if (a.type === 'send') hostSendUnit(a.unitType, true);
+}
+
+// ── Gast: nur zeichnen, Zustand kommt per WebSocket-Push ─────────────────
+function guestRenderLoop(ts) {
+  const dt = ts - lastTime; lastTime = ts;
+  draw();
+  if (!gameOver) requestAnimationFrame(guestRenderLoop);
+}
+
+function setConnStatus(online) {
+  const el = document.getElementById('connStatus');
+  el.textContent = online ? '🟢 Gegner verbunden' : '⚪ Warte auf Gegner…';
+  el.classList.toggle('online', online);
+}
+
+// ── UI-Aktualisierung & Zeichnen ─────────────────────────────────────────
+function updateUIFromState() {
+  if (!state) return;
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  const myLives = isHost ? state.p1Lives : state.p2Lives;
+  const oppGold = isHost ? state.p2Gold : state.p1Gold;
+  const oppLives = isHost ? state.p2Lives : state.p1Lives;
+  const myStructs = isHost ? state.p1Structures : state.p2Structures;
+  const myBonus = isHost ? state.p1BonusIncome : state.p2BonusIncome;
+  const oppBonus = isHost ? state.p2BonusIncome : state.p1BonusIncome;
+  document.getElementById('myGold').textContent = Math.floor(myGold);
+  document.getElementById('myLives').textContent = myLives;
+  document.getElementById('oppGold').textContent = Math.floor(oppGold);
+  document.getElementById('oppLives').textContent = oppLives;
+  document.getElementById('myIncome').textContent = (1 + mineIncomeTotal(myStructs) + myBonus).toFixed(1);
+  document.getElementById('oppIncome').textContent = (1 + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) + oppBonus).toFixed(1);
+  BUILD_ORDER.forEach(key => { document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1'; });
+  Object.keys(UNIT_TYPES).forEach(key => { document.getElementById('send-' + key).disabled = myGold < UNIT_TYPES[key].cost; });
+  if (selectedStructure) {
+    const fresh = myStructs.find(s => s.c === selectedStructure.c && s.r === selectedStructure.r);
+    selectedStructure = fresh || null;
+  }
+  updateInfoPanel();
+}
+
+function drawLane(ctx, structures, units, projectiles) {
+  ctx.clearRect(0, 0, LANE_W, LANE_H);
+  for (let r = 0; r < LANE_ROWS; r++) for (let c = 0; c < LANE_COLS; c++) {
+    ctx.fillStyle = (r === PATH_ROW) ? '#3a3f47' : ((r + c) % 2 === 0 ? '#232a33' : '#212831');
+    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+  }
+  structures.forEach(t => {
+    if (t.type === 'mine') return;
+    ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.arc(t.x, t.y, effectiveRange(t), 0, Math.PI * 2); ctx.fill();
+  });
+  structures.forEach(t => {
+    ctx.beginPath(); ctx.fillStyle = t.color; ctx.arc(t.x, t.y, t.type === 'mine' ? 12 : 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
+    if (t.type === 'mine') { ctx.fillStyle = '#10151b'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', t.x, t.y + 1); }
+  });
+  units.forEach(u => {
+    ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
+    const w = u.radius * 2;
+    ctx.fillStyle = '#000'; ctx.fillRect(u.x - w / 2, u.y - u.radius - 8, w, 4);
+    ctx.fillStyle = '#7CFC00'; ctx.fillRect(u.x - w / 2, u.y - u.radius - 8, w * (u.hp / u.maxHp), 4);
+  });
+  projectiles.forEach(p => { ctx.beginPath(); ctx.fillStyle = p.color; ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(LANE_W - 6, PATH_ROW * CELL, 6, CELL);
+}
+function draw() {
+  if (!state) return;
+  const myCtx = document.getElementById('myCanvas').getContext('2d');
+  const oppCtx = document.getElementById('oppCanvas').getContext('2d');
+  if (isHost) {
+    drawLane(myCtx, state.p1Structures, state.unitsOnLaneP1, state.projP1);
+    drawLane(oppCtx, state.p2Structures, state.unitsOnLaneP2, state.projP2);
+  } else {
+    drawLane(myCtx, state.p2Structures, state.unitsOnLaneP2, state.projP2);
+    drawLane(oppCtx, state.p1Structures, state.unitsOnLaneP1, state.projP1);
+  }
+}
+
+function showEndOverlay() {
+  gameOver = true;
+  const iWon = state.winner === myRole;
+  document.getElementById('overlay').style.display = 'flex';
+  document.getElementById('overlayTitle').textContent = iWon ? '🎉 Du hast gewonnen!' : '💀 Du hast verloren!';
+  document.getElementById('overlayText').textContent = iWon ? 'Der Gegner hat keine Leben mehr.' : 'Du hast keine Leben mehr.';
+}
+</script>
+</body>
+</html>

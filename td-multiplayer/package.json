@@ -1,0 +1,14 @@
+{
+  "name": "td-multiplayer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
