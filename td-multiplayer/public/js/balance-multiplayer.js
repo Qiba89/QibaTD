@@ -8,10 +8,24 @@ const TOWER_TYPES = {
   arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 9,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45, groundOnly: true },
   frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 550, slow: 0.5, slowDuration: 1500 },
-  mine:   { name: 'Mine',      cost: 60,  color: '#ffd166' },
+  // Kosten 60 → 100: bei 60 war die Amortisationszeit (10s bis der Grund-Ertrag von 6 Gold/s die
+  // Kosten wieder reingeholt hat) zu kurz - eine Mine war praktisch risikofrei sofort im Vorteil.
+  // Bei 100 sind es ~16.7s Amortisation, spürbar mehr Risiko/Opportunitätskosten (das Gold hätte in
+  // der Zeit auch schon einen halben Turm-Tier oder eine Einheiten-Sendung sein können). Ertrag
+  // (6 Gold/s Basis) bewusst unverändert, siehe mineIncome() unten.
+  mine:   { name: 'Mine',      cost: 100, color: '#ffd166' },
 };
 const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'mine'];
 const DEFAULT_INCOME_BOOST_RATE = 0.10;
+
+// Minen-Anzahl-Limit: 7 pro Spieler. Ohne Limit ist bei jetzt 50 Tier-Stufen (siehe unten) sonst
+// eine "je mehr Minen, desto besser"-Strategie ohne Gegenwert möglich - Minen-Ertrag ist rein
+// additiv und passiv, kostet anders als Türme keine laufende Aufmerksamkeit/Zielauswahl. Ein Limit
+// erzwingt eine echte Boden-vs-Wirtschaft-Entscheidung. 7 gewählt statt 5, weil bei 5 zu wenig
+// Spielraum für unterschiedliche Wirtschafts-Strategien bleibt (Zinsen/Steuern-Tech, siehe unten,
+// profitiert zusätzlich von einer soliden Gold-Basis); 7 von 51 Feldern pro Spur lässt trotzdem
+// reichlich Platz für Türme (auch bei einer voll ausgebauten Verteidigung von 15-20+ Türmen).
+const MINE_MAX_COUNT = 7;
 
 // Einheiten (werden zum Gegner geschickt)
 const UNIT_TYPES = {
@@ -22,20 +36,25 @@ const UNIT_TYPES = {
   titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
 };
 
-// Einheiten-Upgrades: jetzt 10 Stufen (war 3), damit Einheiten mit den (jetzt gedeckelten,
-// siehe balance-shared.js) Türmen mithalten und sie am Ende übertreffen können — sonst
-// stagniert das Spiel, weil die Verteidigung strukturell immer gewinnt.
-// HP wächst weiter exponentiell (x1.35/Tier statt vorher x2/Tier — x2 über 10 Stufen wäre
-// x1024 gewesen, klar unsinnig). Bei Tier 10: x20.1 HP. Türme sind bei vollem Tier-10-Ausbau
-// auf maximal ~x9.9 Schadens-Durchsatz gedeckelt (Schaden x4.5 * Feuerrate x2.2) — eine voll
-// ausgebaute Einheit hat also strukturell mehr HP-Wachstum als der Turm Schaden aufbauen kann,
-// damit ein Durchbruch bei genug Investition möglich bleibt.
-// Kosten wachsen ebenfalls exponentiell, aber deutlich sanfter (x1.6 statt x5/Tier), sonst
-// wäre Tier 10 utopisch teuer (bei x5 kostet allein Tier 10 eines Sprinters ~59.000 Gold).
-const UNIT_MAX_TIER = 10;
+// Einheiten-Upgrades: jetzt 50 Stufen (war 10, davor 3), damit Einheiten mit den (ebenfalls auf 50
+// Stufen gestreckten, siehe balance-shared.js) Türmen mithalten und sie am Ende übertreffen können —
+// sonst stagniert das Spiel, weil die Verteidigung strukturell immer gewinnt.
+// HP-Wachstum jetzt EXPLIZIT GEDECKELT (vorher unbegrenzt - bei 50 Tiers wäre x1.35/Tier auf
+// x3,5 Millionen explodiert). Deckel bei UNIT_HP_CAP_MULT=20 (praktisch identisch mit dem alten,
+// bei Tier10 uncapped erreichten Wert x20.1) - bewusst weiterhin ÜBER dem Turm-Schadens-Durchsatz-
+// Deckel (x9.9 = Schaden x4.5 * Feuerrate x2.2, unverändert), damit eine voll ausgebaute Einheit
+// strukturell mehr HP-Wachstum hat als der Turm Schaden aufbauen kann - ein Durchbruch bei genug
+// Investition bleibt möglich. Wachstumsrate gesenkt (x1.35 → x1.0617/Tier), damit der Deckel jetzt
+// bei Tier ≈50 statt ≈10 erreicht wird (gleiches Prinzip wie bei den Turm-Werten).
+// Kosten-Wachstum ebenfalls gesenkt (x1.6 → x1.09/Tier) - bleibt bewusst UNGEDECKELT (Kosten dürfen
+// am Ende richtig teuer werden, das limitiert sich über die schiere Größe von selbst), aber deutlich
+// sanfter gestreckt: derselbe Ziel-Endpunkt (~x69 Kostenmultiplikator, wie beim alten x1.6^9 zu
+// Tier10) wird jetzt bei Tier 50 statt Tier 10 erreicht.
+const UNIT_MAX_TIER = 50;
 const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300 };
-const UNIT_HP_GROWTH_PER_TIER = 1.35;
-const UNIT_COST_GROWTH_PER_TIER = 1.6;
+const UNIT_HP_GROWTH_PER_TIER = 1.0617;
+const UNIT_HP_CAP_MULT = 20;
+const UNIT_COST_GROWTH_PER_TIER = 1.0902;
 
 // Sende-Limit: max. 20 Einheiten pro rollierendem 10-Sekunden-Fenster (25 mit Angriffs-Tech T3)
 const SEND_LIMIT_COUNT = 20;
@@ -59,10 +78,31 @@ const TECH_MAX_TIER = 4;
 const TECH_BRANCHES = ['defense', 'economy', 'attack'];
 const TECH_LABELS = {
   defense: { name: '🛡️ Verteidigung', tiers: ['Einheiten-Regeneration (+5% Max-HP alle 2s für gesendete Einheiten)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
-  economy: { name: '💰 Wirtschaft', tiers: ['Minen-Ertrag +20%', 'Sende-Einkommensschub +5%', 'Grundeinkommen +1 Gold/s', 'Grundeinkommen nochmal +2 Gold/s'] },
+  // Wirtschaft Tier 3/4 umgebaut (waren vorher flache +1 bzw. +2 Gold/s - bei schon hohem Einkommen
+  // spätestens ab ein paar tausend Gold/s praktisch bedeutungslos). Zinsen skalieren stattdessen MIT
+  // dem eigenen Vermögen (siehe INTEREST_RATE_PER_SEC unten), Steuern MIT dem Einkommen des Gegners
+  // (siehe TAX_RATE) - beide bleiben so über die ganze Partie relevant statt nur früh.
+  economy: { name: '💰 Wirtschaft', tiers: ['Minen-Ertrag +20%', 'Sende-Einkommensschub +5%', 'Zinsen (1%/s vom aktuellen Gold)', 'Steuern (+5% vom Einkommen des Gegners)'] },
   attack:  { name: '⚔️ Angriff', tiers: ['Lebensklau (+1 eigenes Leben je durchgekommener Einheit)', 'Einheiten-Tempo +10%', 'Sende-Limit 20→25 pro 10s', 'Titan freigeschaltet (Elite-Einheit)'] },
 };
 function techPointCost(tier) { return 1; } // Jede Stufe kostet pauschal 1 Punkt (vorher: Tier 1 = 1P, Tier 2 = 2P, ... — zu langsam, da Punkte selten sind)
+
+// Zinsen (Wirtschaft Tier 3): 1% pro Sekunde vom AKTUELLEN Gold-Bestand, kontinuierlich (nicht erst
+// einmal pro ganzer Sekunde) - wächst also mit dem eigenen Vermögen mit, statt bei hohem Einkommen
+// wertlos zu werden wie die alte feste +1 Gold/s. Achtung, bewusst dokumentiert: das ist Zinseszins
+// (kontinuierliches Compoundieren) - bei ungenutztem, nur liegendem Gold über eine ganze lange
+// Partie (>10 Minuten) kann sich das stark aufschaukeln (z.B. e^(0.01×600)≈403× nach 10 Minuten
+// UNGENUTZTEM Gold). In der Praxis wird Gold aber laufend für Türme/Einheiten/Tech ausgegeben, was
+// das stark dämpft - trotzdem ein Punkt fürs Playtesting, falls sich reines Gold-Horten als
+// dominante Strategie erweist.
+const INTEREST_RATE_PER_SEC = 0.01;
+// Steuern (Wirtschaft Tier 4): +5% vom EINKOMMEN des Gegners (nicht von dessen Gold-Bestand!) als
+// eigener Bonus. Bewusst als Abschöpfung der laufenden Einnahmen interpretiert, nicht als Raub am
+// Vermögen - 5%/s vom GOLD-BESTAND des Gegners wäre bei ein paar tausend Gold sofort verheerend und
+// könnte das Spiel im Extremfall in wenigen Sekunden gegen den Reicheren entscheiden. Bezieht sich
+// auf das Brutto-Einkommen des Gegners OHNE dessen eigene Zinsen/Steuern (siehe hostUpdate()), sonst
+// entsteht eine zirkuläre Abhängigkeit, falls beide Spieler Steuern haben.
+const TAX_RATE = 0.05;
 
 // Defense-Tier-1: die vom Spieler gesendeten Einheiten regenerieren HP, während sie über
 // die gegnerische Lane laufen. 5% alle 2s, damit heilt eine Einheit ca. 20% ihrer Max-HP
@@ -80,11 +120,22 @@ function techPointBuyCost(n) {
   return 1000 * b;
 }
 
-function mineIncome(t) { return 6 * Math.pow(1.5, t.tier); } // Basis zahlt sich in ~10s aus (60 Gold Kosten), je Tier x1.5
+// Minen teilen sich die Tier-Stufen (0-50) und die Upgrade-Kosten (tierUpgradeCost() aus
+// balance-shared.js) mit Türmen, aber Ertrag statt Schaden wächst pro Tier. War früher mit
+// TOWER_MAX_TIER=10 unbegrenzt (x1.5/Tier, Tier10 ≈ x57.7 ≈ 346 Gold/s) - bei jetzt 50 Tiers
+// UNGEDECKELT wäre das bei Tier50 ≈ x6.4×10^8 (absurd). Deshalb jetzt gedeckelt und die
+// Wachstumsrate gesenkt (x1.09/Tier statt x1.5/Tier), sodass der Deckel (×60 ≈ 360 Gold/s, minimal
+// über dem alten Tier10-Wert) grob erst nahe Tier 50 erreicht wird statt schon nahe Tier 10 -
+// gleiches Prinzip wie beim Turm-Schadensdeckel weiter oben: die alte Endstärke bleibt ungefähr
+// erhalten, verteilt sich aber jetzt über den vollen neuen Tier-Bereich statt nur die ersten 10 Stufen.
+const MINE_INCOME_GROWTH_PER_TIER = 1.09;
+const MINE_INCOME_CAP_MULT = 60;
+function mineIncome(t) { return 6 * Math.min(Math.pow(MINE_INCOME_GROWTH_PER_TIER, t.tier), MINE_INCOME_CAP_MULT); }
 function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
 
-function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier); }
-function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier)); }
+function unitHpMult(tier) { return Math.min(Math.pow(UNIT_HP_GROWTH_PER_TIER, tier), UNIT_HP_CAP_MULT); }
+function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * unitHpMult(tier); }
+function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * unitHpMult(tier)); }
 function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
 
 // ── KI-Gegner: 3 Schwierigkeitsgrade, ersetzt Spieler 2 wenn kein echter Mitspieler da ist ──

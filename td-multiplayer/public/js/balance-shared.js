@@ -5,17 +5,26 @@
 // wird hier etwas geändert, wirkt es sich auf BEIDE Modi aus.
 // Siehe docs/balancing.md für die Design-Begründung hinter den Werten.
 
-const TOWER_MAX_TIER = 10; // war 4 — angehoben, damit Türme genug Stufen für das Level-Stern-System haben (alle 5 Level ein Stern)
-const TIER_COST_BASE = 15, TIER_COST_GROWTH = 1.7;
-const DAMAGE_GROWTH_SINGLE = 1.40, AOE_DAMAGE_GROWTH = 1.25;
-// Schadens-Wachstum ist jetzt GEDECKELT (vorher unbegrenzt) — bei 10 Tiers wäre 1.40^10 ≈ x29
-// sonst absurd stark geworden. Der Deckel liegt knapp über dem alten "natürlichen" Maximum bei
-// Tier 4 (1.40^4≈3.84 / 1.25^4≈2.44), damit sich die alte Turmstärke am alten Max-Tier kaum
-// ändert, aber jetzt über 10 statt 4 Stufen erreicht wird (siehe docs/balancing.md).
+// TOWER_MAX_TIER 10 → 50 (nochmal angehoben, auf Wunsch "alle Max-Level bis 50 ausbauen und
+// skalieren"). Die CAP-Werte unten (DAMAGE_CAP_MULT_*, AS_CAP_MULT, RANGE_CAP_MULT, RADIUS_CAP_MULT)
+// sind bewusst UNVERÄNDERT geblieben - das sind die tatsächlichen Balance-Endpunkte (z.B. "ein Turm
+// darf am Ende maximal ×9.9 Schadens-Durchsatz haben"), die bleiben richtig, unabhängig davon, über
+// wie viele Tiers sie erreicht werden. Was sich ändert, sind die GROWTH-Raten pro Tier: die wurden
+// neu berechnet, damit dieselben Caps nicht mehr schon um Tier ~4-10 erreicht werden (dann wären
+// Tiers 10-50 bedeutungslos - reine Kosmetik ohne jeden Kampfwert-Zuwachs), sondern smooth über den
+// vollen neuen Bereich bis nahe Tier 50 (siehe docs/balancing.md für die genaue Herleitung).
+const TOWER_MAX_TIER = 50;
+// Kosten-Wachstum ebenfalls gesenkt (1.7 → 1.15/Tier), sonst wäre die Summe aller Upgrades bis
+// Tier 50 astronomisch (bei 1.7 wären es Milliarden Gold). Bei 1.15 kostet der letzte Schritt
+// (Tier 49→50) rechnerisch ~16.250 Gold, kumuliert bis Tier 50 ~124.500 Gold für einen einzelnen
+// voll ausgebauten Turm — ca. das 17-fache der alten "Tier 10 komplett" Summe (~7.300 Gold), was
+// über 5× mehr Tiers und die jetzt viel stärkere Wirtschaft (Minen-Deckel, Zinsen, Steuern) plausibel ist.
+const TIER_COST_BASE = 15, TIER_COST_GROWTH = 1.15;
+const DAMAGE_GROWTH_SINGLE = 1.0305, AOE_DAMAGE_GROWTH = 1.0193; // erreichen ihre Caps jetzt bei Tier ≈50 statt ≈4-5
 const DAMAGE_CAP_MULT_SINGLE = 4.5, DAMAGE_CAP_MULT_AOE = 2.6;
-const AS_GROWTH_PER_TIER = 0.15, AS_CAP_MULT = 2.2;
-const RANGE_GROWTH_PER_TIER = 1.05, RANGE_CAP_MULT = 1.2;
-const RADIUS_GROWTH_PER_TIER = 1.08, RADIUS_CAP_MULT = 1.35;
+const AS_GROWTH_PER_TIER = 0.024, AS_CAP_MULT = 2.2; // erreicht Cap jetzt bei Tier 50 statt Tier 8
+const RANGE_GROWTH_PER_TIER = 1.0037, RANGE_CAP_MULT = 1.2; // erreicht Cap jetzt bei Tier ≈50 statt ≈4
+const RADIUS_GROWTH_PER_TIER = 1.0060, RADIUS_CAP_MULT = 1.35; // erreicht Cap jetzt bei Tier ≈50 statt ≈4
 
 function tierUpgradeCost(nextTier) { return Math.round(TIER_COST_BASE * Math.pow(TIER_COST_GROWTH, nextTier)); }
 function effectiveDamage(t) {
@@ -40,10 +49,12 @@ function darkenColor(hex, tier) {
   return `rgb(${r},${g},${b})`;
 }
 function drawLevelStars(ctx, x, y, tier) {
-  const stars = Math.min(Math.floor(tier / 5), 4);
+  // Sternanzahl-Deckel 4 → 10 mitgezogen (Max-Tier jetzt 50 statt 10, weiterhin 1 Stern alle 5
+  // Stufen — bei Tier 50 sind das genau 10 Sterne).
+  const stars = Math.min(Math.floor(tier / 5), 10);
   if (stars < 1) return;
   ctx.fillStyle = '#ffd700';
-  ctx.font = 'bold 9px sans-serif';
+  ctx.font = 'bold 8px sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText('★'.repeat(stars), x, y);
 }

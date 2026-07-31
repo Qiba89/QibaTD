@@ -272,6 +272,10 @@
   }
   #singleplayerMode .sp-tower-btn:hover { border-color: var(--accent); }
   #singleplayerMode .sp-tower-btn.sp-selected { border-color: var(--accent2); background: #2a3542; }
+  #singleplayerMode .sp-build-row { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
+  #singleplayerMode .sp-build-row .sp-tower-btn { margin-bottom: 0; flex: 1; }
+  #singleplayerMode .sp-tower-locked { display: none; }
+  #singleplayerMode #spShieldIndicator { color: #4fd1c5; font-weight: 700; }
   #singleplayerMode .sp-tower-btn .sp-swatch {
     width: 22px; height: 22px; border-radius: 50%;
     flex-shrink: 0;
@@ -568,8 +572,11 @@
       <span>❤️ <b id="spLivesVal">20</b></span>
       <span>💰 <b id="spGoldVal">220</b></span>
       <span>🌊 <b id="spWaveVal">1</b></span>
+      <span>🔧 <b id="spTechPointsVal">0</b></span>
+      <span>🛡️<span id="spShieldIndicator">—</span></span>
     </div>
 
+    <button class="sell-all-btn" id="spSellAllBtn" onclick="sellAllTowers()">🗑 Alle Türme verkaufen</button>
     <div id="spTowerButtons"></div>
 
     <div id="spTowerInfo">
@@ -590,7 +597,13 @@
     </div>
 
     <button class="sp-action" id="spWaveBtn">Welle starten ▶</button>
-    <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen.</div>
+    <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen. Doppelklick auf einen eigenen Turm upgradet ihn direkt.</div>
+  </div>
+
+  <div class="sp-panel">
+    <h3 style="margin-top:0;">🔧 Tech-Tree (<span id="spTechPointsLabel">0</span> Punkte)</h3>
+    <button class="action-btn" id="spBuyTechPointBtn" onclick="buySpTechPoint()"></button>
+    <div id="spTechTree"></div>
   </div>
 </div>
 
@@ -818,8 +831,9 @@ function buildPalette() {
     const btn = document.createElement('button');
     btn.className = 'pick-btn'; btn.id = 'build-' + key;
     const sub = key === 'mine' ? '+6 Gold/s' : `${t.damage} Dmg`;
+    const countLabel = key === 'mine' ? ` <span id="mine-count-label"></span>` : '';
     btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
-      <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold — ${sub}</div></div>`;
+      <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold — ${sub}${countLabel}</div></div>`;
     btn.onclick = () => selectBuildType(key);
     row.appendChild(btn);
 
@@ -874,6 +888,10 @@ let selectedStructure = null;
 function selectBuildType(key) {
   const myGold = isHost ? state.p1Gold : state.p2Gold;
   if (myGold < TOWER_TYPES[key].cost) { setMessage(`Nicht genug Gold für ${TOWER_TYPES[key].name}.`); return; }
+  if (key === 'mine') {
+    const myStructs = isHost ? state.p1Structures : state.p2Structures;
+    if (myStructs.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
+  }
   deselect();
   selectedBuildType = (selectedBuildType === key) ? null : key;
   document.querySelectorAll('.pick-btn').forEach(b => b.classList.remove('selected'));
@@ -901,6 +919,7 @@ document.getElementById('myCanvas').addEventListener('click', (e) => {
   }
   if (selectedBuildType) {
     if (!isBuildable(c, r)) { setMessage('Hier kann nichts gebaut werden (Weg).'); return; }
+    if (selectedBuildType === 'mine' && myStructures.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
     const type = TOWER_TYPES[selectedBuildType];
     const myGold = isHost ? state.p1Gold : state.p2Gold;
     if (myGold < type.cost) { setMessage('Nicht genug Gold.'); return; }
@@ -1086,6 +1105,7 @@ function newStructure(key, c, r) {
 function hostBuild(key, c, r, forGuest) {
   const structs = forGuest ? state.p2Structures : state.p1Structures;
   if (structs.some(s => s.c === c && s.r === r) || !isBuildable(c, r)) return;
+  if (key === 'mine' && structs.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) return; // Minen-Limit
   const type = TOWER_TYPES[key];
   if (forGuest) { if (state.p2Gold < type.cost) return; state.p2Gold -= type.cost; }
   else { if (state.p1Gold < type.cost) return; state.p1Gold -= type.cost; }
@@ -1153,9 +1173,16 @@ function hasTech(techObj, branch, tier) { return techObj[branch] >= tier; }
 function sendLimitFor(tech) { return hasTech(tech, 'attack', 3) ? SEND_LIMIT_COUNT_UPGRADED : SEND_LIMIT_COUNT; }
 function incomeRateBonusFor(tech) { return hasTech(tech, 'economy', 2) ? 0.05 : 0; }
 function unitSpeedMultFor(tech) { return hasTech(tech, 'attack', 2) ? 1.1 : 1; }
-function baseIncomeFor(tech) { return 1 + (hasTech(tech, 'economy', 3) ? 1 : 0) + (hasTech(tech, 'economy', 4) ? 2 : 0); }
+function baseIncomeFor(tech) { return 1; } // Tier 3/4 waren hier vorher eingerechnet, sind jetzt Zinsen/Steuern (siehe unten)
 function mineIncomeMultFor(tech) { return hasTech(tech, 'economy', 1) ? 1.2 : 1; }
 function rangeMultFor(tech) { return hasTech(tech, 'defense', 3) ? 1.1 : 1; }
+// "Brutto"-Einkommen: Basis + Minen + Sende-Bonus, OHNE Zinsen/Steuern - das ist die Grundlage,
+// von der die Steuer des Gegners abgezweigt wird (siehe hostUpdate()). Ohne diese Trennung würde
+// "Steuer vom Einkommen des Gegners" zirkulär, falls beide Spieler Steuern haben (A's Einkommen
+// hängt von B's Einkommen ab, das wiederum von A's Einkommen abhängt, ...).
+function grossIncomeFor(tech, structs, bonusIncome) { return baseIncomeFor(tech) + mineIncomeTotal(structs) * mineIncomeMultFor(tech) + bonusIncome; }
+function interestIncomeFor(tech, currentGold) { return hasTech(tech, 'economy', 3) ? currentGold * INTEREST_RATE_PER_SEC : 0; }
+function taxIncomeFor(tech, opponentGrossIncome) { return hasTech(tech, 'economy', 4) ? opponentGrossIncome * TAX_RATE : 0; }
 
 function hostSendUnit(key, forGuest) {
   const u = UNIT_TYPES[key];
@@ -1171,16 +1198,22 @@ function hostSendUnit(key, forGuest) {
   const rate = (u.incomeBoostRate !== undefined ? u.incomeBoostRate : DEFAULT_INCOME_BOOST_RATE) + incomeRateBonusFor(tech);
   const hp = unitEffectiveHp(key, tier);
   const speed = u.speed * unitSpeedMultFor(tech);
-  const unitObj = { id: nextEntityId++, hp, maxHp: hp, speed, radius: u.radius, color: u.color, flying: !!u.flying, tier, x: 0, y: PATH_Y, slowUntil: 0 };
+  // cost wird auf der Einheit gespeichert (nicht neu aus dem aktuellen Tier berechnet), weil die
+  // Kill-Belohnung (siehe damageUnit()/hostUpdate()) erst beim Tod der Einheit ausgezahlt wird -
+  // zu dem Zeitpunkt könnte der sendende Spieler seinen Einheiten-Tier schon weiter hochgezogen
+  // haben, dann wäre der Sende-Preis von damals nicht mehr rekonstruierbar.
+  const unitObj = { id: nextEntityId++, hp, maxHp: hp, speed, radius: u.radius, color: u.color, flying: !!u.flying, tier, cost, x: 0, y: PATH_Y, slowUntil: 0 };
   sendTimes.push(Date.now());
+  // Kein sofortiges Gold mehr für den Gegner beim Senden (war vorher Math.floor(cost/3), unabhängig
+  // davon ob die Einheit je etwas bewirkt) - stattdessen bekommt jetzt der die Belohnung, der die
+  // Einheit tatsächlich TÖTET (Kill-Bounty, siehe damageUnit()/hostUpdate()). Macht erfolgreiche
+  // Verteidigung lohnend statt "jeder Angriff finanziert automatisch den Verteidiger mit".
   if (forGuest) {
     state.p2Gold -= cost;
-    state.p1Gold += Math.floor(cost / 3);
     state.p2BonusIncome += sendIncomeBoost(cost, rate);
     state.unitsOnLaneP1.push(unitObj);
   } else {
     state.p1Gold -= cost;
-    state.p2Gold += Math.floor(cost / 3);
     state.p1BonusIncome += sendIncomeBoost(cost, rate);
     state.unitsOnLaneP2.push(unitObj);
   }
@@ -1217,15 +1250,18 @@ function moveUnits(units, onReachEnd) {
     if (u.x >= LANE_W) { units.splice(i, 1); onReachEnd(u); }
   }
 }
-function damageUnit(u, dmg, units, onBossKilled) {
+// onUnitDeath(unit): wird für JEDEN Kill aufgerufen (Bosse und normale Einheiten), nicht nur für
+// Bosse - der Aufrufer (siehe hostUpdate()) entscheidet dort, ob Tech-Punkt (Boss) oder Kill-Bounty
+// (normale Einheit) fällig ist.
+function damageUnit(u, dmg, units, onUnitDeath) {
   u.hp -= dmg;
   if (u.hp <= 0) {
     const idx = units.indexOf(u);
     if (idx >= 0) units.splice(idx, 1);
-    if (u.isBoss && onBossKilled) onBossKilled();
+    if (onUnitDeath) onUnitDeath(u);
   }
 }
-function moveProjectiles(projectiles, units, onBossKilled) {
+function moveProjectiles(projectiles, units, onUnitDeath) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     if (!units.includes(p.target)) { projectiles.splice(i, 1); continue; }
@@ -1233,8 +1269,8 @@ function moveProjectiles(projectiles, units, onBossKilled) {
     const dist = Math.hypot(dx, dy);
     const step = p.speed * dtGlobal / 1000;
     if (dist < step + 5) {
-      if (p.splash) units.slice().forEach(u => { if (p.groundOnly && u.flying) return; if (Math.hypot(u.x - p.target.x, u.y - p.target.y) <= p.splash) damageUnit(u, p.damage, units, onBossKilled); });
-      else { damageUnit(p.target, p.damage, units, onBossKilled); if (p.slow && !p.target.flying) p.target.slowUntil = performance.now() + p.slowDuration; }
+      if (p.splash) units.slice().forEach(u => { if (p.groundOnly && u.flying) return; if (Math.hypot(u.x - p.target.x, u.y - p.target.y) <= p.splash) damageUnit(u, p.damage, units, onUnitDeath); });
+      else { damageUnit(p.target, p.damage, units, onUnitDeath); if (p.slow && !p.target.flying) p.target.slowUntil = performance.now() + p.slowDuration; }
       projectiles.splice(i, 1);
     } else { p.x += (dx / dist) * step; p.y += (dy / dist) * step; }
   }
@@ -1302,8 +1338,14 @@ function hostUpdate(dt) {
   if (state.phase === 'ended') return;
 
   // phase === 'playing'
-  state.p1Gold += (baseIncomeFor(state.p1Tech) + mineIncomeTotal(state.p1Structures) * mineIncomeMultFor(state.p1Tech) + state.p1BonusIncome) * dt / 1000;
-  state.p2Gold += (baseIncomeFor(state.p2Tech) + mineIncomeTotal(state.p2Structures) * mineIncomeMultFor(state.p2Tech) + state.p2BonusIncome) * dt / 1000;
+  // Brutto zuerst (ohne Zinsen/Steuern), dann Steuer aus dem GEGNER-Brutto ableiten (nicht aus
+  // dessen Gesamteinkommen inkl. eigener Steuer) - vermeidet Zirkularität, wenn beide Steuer-Tech haben.
+  const p1Gross = grossIncomeFor(state.p1Tech, state.p1Structures, state.p1BonusIncome);
+  const p2Gross = grossIncomeFor(state.p2Tech, state.p2Structures, state.p2BonusIncome);
+  const p1Income = p1Gross + interestIncomeFor(state.p1Tech, state.p1Gold) + taxIncomeFor(state.p1Tech, p2Gross);
+  const p2Income = p2Gross + interestIncomeFor(state.p2Tech, state.p2Gold) + taxIncomeFor(state.p2Tech, p1Gross);
+  state.p1Gold += p1Income * dt / 1000;
+  state.p2Gold += p2Income * dt / 1000;
 
   tickBossSpawn(dt);
   tickPlayerTimers(dt);
@@ -1347,8 +1389,16 @@ function hostUpdate(dt) {
   });
   fireTowers(state.p1Structures, state.unitsOnLaneP1, state.projP1, rangeMultFor(state.p1Tech));
   fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2, rangeMultFor(state.p2Tech));
-  moveProjectiles(state.projP1, state.unitsOnLaneP1, () => { state.p1TechPoints++; });
-  moveProjectiles(state.projP2, state.unitsOnLaneP2, () => { state.p2TechPoints++; });
+  // Kill-Bounty: wer die Einheit tötet, bekommt das Gold (floor(gespeicherter Sende-Preis / 3),
+  // wie vorher beim automatischen Sende-Bonus) - Bosse geben stattdessen weiterhin einen Tech-Punkt.
+  moveProjectiles(state.projP1, state.unitsOnLaneP1, (u) => {
+    if (u.isBoss) state.p1TechPoints++;
+    else state.p1Gold += Math.floor((u.cost || 0) / 3);
+  });
+  moveProjectiles(state.projP2, state.unitsOnLaneP2, (u) => {
+    if (u.isBoss) state.p2TechPoints++;
+    else state.p2Gold += Math.floor((u.cost || 0) / 3);
+  });
 }
 function hostEndGame(winner) { state.gameOver = true; state.winner = winner; state.phase = 'ended'; }
 
@@ -1528,22 +1578,29 @@ function aiUpgradeCheapestUnitTier(profile) {
   if (state.p2Gold - cost >= state.p2Gold * profile.reserveGoldRatio) hostUpgradeUnit(key, true);
 }
 
-// Akute Gefahr: zu wenig eigene Türme ODER gerade ein Schwarm gesendeter Spieler-Einheiten im
-// Anflug, den die aktuelle Turmzahl absehbar nicht bewältigt. Dann pausiert die KI Angriff/Tech-
-// Käufe/Einheiten-Upgrades komplett und wirft ihr gesamtes Gold (Reserve ignoriert) in den
-// Turmbau/-ausbau, statt stur weiter "maximal aggressiv" zu spielen. Verhindert, dass z.B. der
-// Weltenender bei einem sehr frühen, harten Rush des Spielers einfach nie eine eigene Verteidigung
-// aufbaut, weil er sein Gold komplett in Einheiten steckt.
+// Akute Gefahr: gerade rollt ein Schwarm Einheiten im Anflug, den die aktuelle Turmzahl absehbar
+// nicht bewältigt. Dann pausiert die KI Angriff/Tech-Käufe/Einheiten-Upgrades komplett und wirft
+// ihr gesamtes Gold (Reserve ignoriert) in den Turmbau/-ausbau, bis minSafeTowers Türme stehen,
+// statt stur weiter "maximal aggressiv" zu spielen.
 //
-// Bewusst NICHT einfach an "eigene Leben gesunken" gekoppelt: Boss-Wellen (alle 90s, treffen beide
-// Seiten unabhängig vom Spielerverhalten) kosten planmäßig auch mal Leben - das deckt schon die
-// normale, mit der Bossrunde wachsende Ziel-Turmzahl ab (siehe Balancing-Doc, "Boss-HP herleiten").
-// Würde jeder Boss-Treffer denselben Notfallmodus auslösen wie ein Spieler-Rush, würde die KI ihre
-// Verteidigung künstlich auf minSafeTowers klein halten und nie zur vollen, für Bosse eigentlich
-// ausreichenden Ausbaustufe kommen - das war ein echter Bug in einer früheren Version dieser Logik
-// (KI verlor gegen einen rein verteidigenden, nie angreifenden Test-Gegner an Boss-Chipschaden).
-// state.p2MaxLives-basierter nearDeath-Wert bleibt als reiner Rückfall für echte Lebensgefahr
-// unabhängig von der Ursache erhalten, aber deutlich niedriger angesetzt als früher.
+// Bewusst NICHT mehr an "noch keine Türme" allein gekoppelt (frühere Version): das zwang die KI,
+// direkt am Spielanfang erst eine Mindest-Verteidigung zu bauen, BEVOR sie überhaupt in Wirtschaft
+// investieren durfte - und war damit spürbar langsamer/schwächer als gefordert ("am Anfang
+// optimierte Balance aus Wirtschaft + Angriff, danach instant auf Defense"). Jetzt gilt: solange
+// nichts anrollt, ist auch 0 Türme kein Notfall - die KI kann von Beginn an frei in Minen und
+// Angriff investieren. Sobald aber Einheiten ankommen (vom Spieler geschickt ODER eigene, beim
+// Gegner durchgekommene und zurückgelaufene Einheiten - siehe die moveUnits()-Loop-Mechanik: jede
+// eigene Angriffs-Einheit, die der Spieler nicht abwehrt, greift danach die KI selbst an), schlägt
+// der Notfallmodus SOFORT (nächster Entscheidungs-Tick) zu.
+//
+// Ebenfalls bewusst NICHT an "eigene Leben gesunken" gekoppelt: Boss-Wellen (alle 90s, treffen
+// beide Seiten unabhängig vom Spielerverhalten) kosten planmäßig auch mal Leben - das deckt schon
+// die normale, mit der Bossrunde wachsende Ziel-Turmzahl ab (siehe Balancing-Doc, "Boss-HP
+// herleiten"). Würde jeder Boss-Treffer denselben Notfallmodus auslösen wie ein Spieler-Rush,
+// würde die KI ihre Verteidigung künstlich auf minSafeTowers klein halten und nie zur vollen, für
+// Bosse eigentlich ausreichenden Ausbaustufe kommen (realer Bug in einer früheren Version dieser
+// Logik). state.p2MaxLives-basierter nearDeath-Wert bleibt nur als Rückfall für echte Lebensgefahr
+// unabhängig von der Ursache erhalten, niedrig angesetzt.
 //
 // Mit Hysterese (aiPanic): ohne die würde die KI bei jedem kurzen Nachlassen des Schwarms sofort
 // wieder auf volle Aggression umschalten und dann erneut einbrechen, sobald der Spieler weiter
@@ -1552,10 +1609,9 @@ function aiUpgradeCheapestUnitTier(profile) {
 let aiPanic = false;
 function aiInEmergency(profile) {
   const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
-  if (towerCount < profile.minSafeTowers) { aiPanic = true; return true; }
-
   const incomingPlayerUnits = state.unitsOnLaneP2.filter(u => !u.isBoss).length;
-  const swarmed = incomingPlayerUnits > towerCount * 2; // mehr anrollende Einheiten als die Türme realistisch gleichzeitig bewältigen
+
+  const swarmed = incomingPlayerUnits > 0 && incomingPlayerUnits > towerCount * 2;
   const nearDeath = state.p2Lives <= state.p2MaxLives * profile.emergencyLivesRatio; // echter Rückfall, unabhängig von der Ursache
   if (swarmed || nearDeath) { aiPanic = true; return true; }
 
@@ -1567,13 +1623,15 @@ function aiInEmergency(profile) {
 }
 
 // Kontinuierliches Bedrohungsmaß (0 = ganz sicher, 1 = voller Notfall) - reagiert wie aiInEmergency
-// auf den tatsächlichen ankommenden Spieler-Schwarm relativ zur eigenen Turmzahl, nicht auf Boss-
-// Chipschaden. Lässt die Offensive schon VOR dem harten Notfall sanft abklingen, statt erst
-// abrupt zu bremsen und danach sofort wieder auf Vollgas zu schalten.
+// auf den tatsächlichen ankommenden Schwarm relativ zur eigenen Turmzahl, nicht auf Boss-
+// Chipschaden und nicht schon auf "noch keine Türme" allein. Lässt die Offensive schon VOR dem
+// harten Notfall sanft abklingen, statt erst abrupt zu bremsen und danach sofort wieder auf
+// Vollgas zu schalten.
 function aiThreatLevel(profile) {
+  const incomingPlayerUnits = state.unitsOnLaneP2.filter(u => !u.isBoss).length;
+  if (incomingPlayerUnits === 0) return 0;
   const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
   if (towerCount === 0) return 1;
-  const incomingPlayerUnits = state.unitsOnLaneP2.filter(u => !u.isBoss).length;
   return Math.max(0, Math.min(1, incomingPlayerUnits / (towerCount * 2)));
 }
 
@@ -1599,7 +1657,7 @@ function aiDecide(profile) {
   const reserve = emergency ? 0 : state.p2Gold * profile.reserveGoldRatio * (1 - threat * 0.8);
   if (!emergency) {
     const mineCount = state.p2Structures.filter(s => s.type === 'mine').length;
-    const targetMines = Math.round(profile.targetMinesBase + profile.targetMinesPerBossRound * state.bossRound);
+    const targetMines = Math.min(MINE_MAX_COUNT, Math.round(profile.targetMinesBase + profile.targetMinesPerBossRound * state.bossRound));
     if (mineCount < targetMines && state.p2Gold - TOWER_TYPES.mine.cost >= reserve) {
       const spot = aiFindBuildSpot();
       if (spot) hostBuild('mine', spot.c, spot.r, true);
@@ -1731,6 +1789,7 @@ function updateUIFromState() {
   lastMyLives = myLives; lastOppLives = oppLives;
 
   const myStructs = isHost ? state.p1Structures : state.p2Structures;
+  const oppStructs = isHost ? state.p2Structures : state.p1Structures;
   const myBonus = isHost ? state.p1BonusIncome : state.p2BonusIncome;
   const oppBonus = isHost ? state.p2BonusIncome : state.p1BonusIncome;
   const myTiers = isHost ? state.p1UnitTiers : state.p2UnitTiers;
@@ -1744,8 +1803,12 @@ function updateUIFromState() {
   document.getElementById('myLives').textContent = myLives;
   document.getElementById('oppGold').textContent = Math.floor(oppGold);
   document.getElementById('oppLives').textContent = oppLives;
-  document.getElementById('myIncome').textContent = (baseIncomeFor(myTech) + mineIncomeTotal(myStructs) * mineIncomeMultFor(myTech) + myBonus).toFixed(1);
-  document.getElementById('oppIncome').textContent = (baseIncomeFor(oppTech) + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) * mineIncomeMultFor(oppTech) + oppBonus).toFixed(1);
+  // Anzeige spiegelt jetzt dieselbe Brutto+Zinsen+Steuer-Rechnung wie hostUpdate() (siehe dort für
+  // die Begründung der Brutto/Netto-Trennung bei der Steuer).
+  const myGrossDisp = grossIncomeFor(myTech, myStructs, myBonus);
+  const oppGrossDisp = grossIncomeFor(oppTech, oppStructs, oppBonus);
+  document.getElementById('myIncome').textContent = (myGrossDisp + interestIncomeFor(myTech, myGold) + taxIncomeFor(myTech, oppGrossDisp)).toFixed(1);
+  document.getElementById('oppIncome').textContent = (oppGrossDisp + interestIncomeFor(oppTech, oppGold) + taxIncomeFor(oppTech, myGrossDisp)).toFixed(1);
   document.getElementById('myTechPoints').textContent = myTechPoints;
   document.getElementById('oppTechPoints').textContent = oppTechPoints;
   document.getElementById('techPointsLabel').textContent = myTechPoints;
@@ -1758,12 +1821,17 @@ function updateUIFromState() {
   document.getElementById('bossTimerVal').textContent = Math.max(0, Math.ceil(state.bossTimer / 1000));
   document.getElementById('bossRoundVal').textContent = state.bossRound;
 
+  const myMineCount = myStructs.filter(s => s.type === 'mine').length;
   BUILD_ORDER.forEach(key => {
-    document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1';
+    const mineCapped = key === 'mine' && myMineCount >= MINE_MAX_COUNT;
+    const buildBtn = document.getElementById('build-' + key);
+    buildBtn.style.opacity = (mineCapped || myGold < TOWER_TYPES[key].cost) ? '0.5' : '1';
+    buildBtn.disabled = mineCapped;
     const cheapestNext = myStructs.filter(s => s.type === key && s.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier)[0];
     const upgAllBtn = document.getElementById('upgrade-all-' + key);
     upgAllBtn.disabled = !cheapestNext || myGold < tierUpgradeCost(cheapestNext.tier + 1);
   });
+  document.getElementById('mine-count-label').textContent = `(${myMineCount}/${MINE_MAX_COUNT})`;
   document.getElementById('sellAllBtn').style.opacity = myStructs.length ? '1' : '0.5';
   document.getElementById('sellAllBtn').disabled = myStructs.length === 0;
   Object.keys(UNIT_TYPES).forEach(key => {
@@ -1828,8 +1896,9 @@ function drawLane(ctx, structures, units, projectiles) {
     const radius = t.type === 'mine' ? 12 : 14;
     ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
-    if (t.type === 'mine') { ctx.fillStyle = '#10151b'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('$', t.x, t.y + 1); }
-    else drawLevelStars(ctx, t.x, t.y, t.tier);
+    // Minen zeigen jetzt (wie Türme) den Level-Stern statt eines "$"-Zeichens — konsistente
+    // Optik über alle Strukturen hinweg, Level-Fortschritt bei Minen war vorher unsichtbar.
+    drawLevelStars(ctx, t.x, t.y, t.tier);
     if (t === selectedStructure) {
       ctx.beginPath(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
       ctx.arc(t.x, t.y, radius + 4, 0, Math.PI * 2); ctx.stroke();
@@ -1922,6 +1991,7 @@ const pathSet = new Set(pathCells.map(([c,r]) => `${c},${r}`));
 
 let gold = 220;
 let lives = 20;
+let maxLives = 20; // Bollwerk (Verteidigung T4) erhöht das
 let wave = 1;
 let towers = [];
 let enemies = [];
@@ -1934,7 +2004,26 @@ let spawnQueue = [];
 let spawnTimer = 0;
 let selectedTower = null; // currently selected placed tower (for upgrade/sell panel)
 
-// Balancing-Werte (SP_TOWER_TYPES, Wellen-Skalierung, Wirtschaft) stecken
+// ── Tech-Tree-Zustand (Port aus dem Multiplayer, siehe balance-singleplayer.js
+// für SP_TECH_LABELS/SP_TECH_BRANCHES und docs/balancing.md für die Begründung
+// jeder einzelnen Stufen-Anpassung) ─────────────────────────────────────────
+let techPoints = 0;
+let techPointsBought = 0;
+let tech = { defense: 0, economy: 0, attack: 0 };
+let shieldCharges = 0;
+let shieldAccum = 0;       // ms seit letztem Schild-Ladezyklus (Verteidigung T2)
+let lifeRegenAccum = 0;    // ms seit letzter Basis-Regeneration (Verteidigung T1)
+let lifeGenAccum = 0;      // ms seit letztem automatischem Extra-Leben (Angriff T1)
+let livesAtWaveStart = 20; // für die "Perfekte Welle"-Prüfung (Wirtschaft T4)
+
+function hasSpTech(branch, tier) { return tech[branch] >= tier; }
+// Effektive Werte inkl. Tech-Boni, on top von den geteilten Tier-Skalierungs-Formeln
+// (effectiveRange/effectiveDamage/effectiveFireRate aus balance-shared.js).
+function spEffectiveRange(t) { return effectiveRange(t) * (hasSpTech('defense', 3) ? (1 + SP_RANGE_BOOST_TIER3) : 1); }
+function spEffectiveDamage(t) { return effectiveDamage(t) * (hasSpTech('attack', 3) ? (1 + SP_DAMAGE_BOOST_TIER3) : 1); }
+function spEffectiveFireRate(t) { return effectiveFireRate(t) / (hasSpTech('attack', 2) ? (1 + SP_FIRERATE_BOOST_TIER2) : 1); }
+
+// Balancing-Werte (SP_TOWER_TYPES, Wellen-Skalierung, Wirtschaft, Tech-Tree) stecken
 // jetzt in js/balance-singleplayer.js (siehe <script>-Tag oben) statt
 // inline hier — siehe docs/balancing.md. Geteilte Tier-Skalierung (Türme)
 // steht in js/balance-shared.js.
@@ -1948,27 +2037,73 @@ function isBuildable(c, r) {
   return !towers.some(t => t.c === c && t.r === r);
 }
 
-// UI: tower buttons
+// UI: tower buttons — je Turm-Typ ein Bau-Button + ein "⬆ Alle"-Upgrade-Button daneben (Port aus
+// dem Multiplayer, siehe buildPalette() im ersten <script>-Block). Türme mit requiresTech (aktuell
+// nur der Titan-Turm, siehe balance-singleplayer.js) starten versteckt (.sp-tower-locked) und werden
+// erst sichtbar, sobald die passende Tech-Stufe freigeschaltet ist (siehe refreshSpTechUI()).
 const towerButtonsDiv = document.getElementById('spTowerButtons');
 Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
+  const row = document.createElement('div');
+  row.className = 'build-row sp-build-row';
+  row.id = 'sp-build-row-' + key;
+  if (t.requiresTech) row.classList.add('sp-tower-locked');
+
   const btn = document.createElement('button');
   btn.className = 'sp-tower-btn';
   btn.id = 'btn-' + key;
   btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
     <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold</div></div>`;
   btn.onclick = () => selectTower(key);
-  towerButtonsDiv.appendChild(btn);
+  row.appendChild(btn);
+
+  const upgAllBtn = document.createElement('button');
+  upgAllBtn.className = 'upgrade-all-btn';
+  upgAllBtn.title = `Alle ${t.name}-Türme um eine Stufe upgraden (soweit Gold reicht)`;
+  upgAllBtn.textContent = '⬆ Alle';
+  upgAllBtn.onclick = () => upgradeAllOfType(key);
+  row.appendChild(upgAllBtn);
+
+  towerButtonsDiv.appendChild(row);
 });
 
 function selectTower(key) {
-  if (gold < SP_TOWER_TYPES[key].cost) {
-    setMessage(`Nicht genug Gold für ${SP_TOWER_TYPES[key].name}.`);
+  const type = SP_TOWER_TYPES[key];
+  if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) return;
+  if (gold < type.cost) {
+    setMessage(`Nicht genug Gold für ${type.name}.`);
     return;
   }
   deselectTower();
   selectedTowerType = (selectedTowerType === key) ? null : key;
   document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
   if (selectedTowerType) document.getElementById('btn-' + key).classList.add('sp-selected');
+}
+
+function sellAllTowers() {
+  if (gameOver || !towers.length) return;
+  deselectTower();
+  const refund = towers.reduce((sum, t) => sum + Math.floor(t.cost * 0.6), 0);
+  gold += refund;
+  towers = [];
+  setMessage(`Alle Türme verkauft für ${refund} Gold.`);
+  updateStats();
+}
+
+function upgradeAllOfType(buildType) {
+  if (gameOver) return;
+  // Günstigste Upgrades zuerst (niedrigste aktuelle Stufe zuerst), damit das Gold möglichst viele
+  // Türme dieses Typs anhebt statt nur einen einzelnen bis ans Limit zu pumpen (wie im Multiplayer).
+  const candidates = towers.filter(t => t.type === buildType && t.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier);
+  let upgraded = 0;
+  for (const t of candidates) {
+    const cost = tierUpgradeCost(t.tier + 1);
+    if (gold < cost) break;
+    gold -= cost;
+    t.tier++;
+    upgraded++;
+  }
+  if (upgraded > 0) setMessage(`${upgraded}× ${SP_TOWER_TYPES[buildType].name} upgegradet.`);
+  updateStats();
 }
 
 function setMessage(msg) {
@@ -1994,6 +2129,7 @@ canvas.addEventListener('click', (e) => {
   if (selectedTowerType) {
     if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
     const type = SP_TOWER_TYPES[selectedTowerType];
+    if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button ist ohnehin versteckt
     if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
     gold -= type.cost;
     towers.push({
@@ -2008,15 +2144,43 @@ canvas.addEventListener('click', (e) => {
   }
 });
 
+// Doppelklick auf einen bestehenden Turm: direkt upgraden, ohne erst das Panel zu öffnen
+// (Port aus dem Multiplayer, siehe dblclick-Handler auf #myCanvas im ersten <script>-Block).
+canvas.addEventListener('dblclick', (e) => {
+  if (gameOver) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const { c, r } = cellFromPixel(x, y);
+  const existing = towers.find(t => t.c === c && t.r === r);
+  if (existing) {
+    selectedTowerType = null;
+    document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
+    selectTowerObject(existing);
+    upgradeSelectedTower();
+  }
+});
+
 function updateStats() {
-  document.getElementById('spGoldVal').textContent = gold;
+  document.getElementById('spGoldVal').textContent = Math.floor(gold);
   document.getElementById('spLivesVal').textContent = lives;
   document.getElementById('spWaveVal').textContent = wave;
+  document.getElementById('spTechPointsVal').textContent = techPoints;
+  document.getElementById('spShieldIndicator').textContent = shieldCharges > 0 ? '●'.repeat(shieldCharges) : '—';
   document.querySelectorAll('.sp-tower-btn').forEach(btn => {
     const key = btn.id.replace('btn-', '');
     btn.style.opacity = gold < SP_TOWER_TYPES[key].cost ? '0.5' : '1';
   });
+  // Türme mit Tech-Voraussetzung (aktuell nur der Titan-Turm) erst nach Freischaltung anzeigen.
+  Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
+    if (!t.requiresTech) return;
+    const row = document.getElementById('sp-build-row-' + key);
+    row.classList.toggle('sp-tower-locked', !hasSpTech(t.requiresTech.branch, t.requiresTech.tier));
+  });
+  document.getElementById('spSellAllBtn').style.opacity = towers.length ? '1' : '0.5';
+  document.getElementById('spSellAllBtn').disabled = towers.length === 0;
   updateTowerInfoPanel();
+  updateSpTechUI();
 }
 
 function pushEnemy(list, hp, speed, radius, color, reward, isBoss) {
@@ -2069,6 +2233,7 @@ document.getElementById('spWaveBtn').addEventListener('click', () => {
   spawnQueue = makeWaveEnemies(wave);
   spawnTimer = 0;
   waveActive = true;
+  livesAtWaveStart = lives; // für "Perfekte Welle" (Wirtschaft T4) — kein Lebensverlust während der Welle
   document.getElementById('spWaveBtn').disabled = true;
   const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', normal: '' };
   setMessage(`Welle ${wave} gestartet!${labels[waveType(wave)]}`);
@@ -2077,7 +2242,9 @@ document.getElementById('spWaveBtn').addEventListener('click', () => {
 function damageEnemy(enemy, dmg) {
   enemy.hp -= dmg;
   if (enemy.hp <= 0) {
-    gold += enemy.reward;
+    // Kill-Gold-Bonus (Wirtschaft T2, Port aus dem Multiplayer-Tech-Tree): +10% Gold pro Kill,
+    // separat von Wirtschaft T1 (das boostet stattdessen das Welleneinkommen, siehe showWaveSummary).
+    gold += enemy.reward * (hasSpTech('economy', 2) ? (1 + SP_KILL_GOLD_BOOST_TIER2) : 1);
     enemies = enemies.filter(e => e !== enemy);
     updateStats();
   }
@@ -2085,6 +2252,40 @@ function damageEnemy(enemy, dmg) {
 
 function update(dt) {
   if (gameOver) return;
+
+  // ── Tech-Tree-Effekte, die kontinuierlich pro Frame wirken (Port aus dem Multiplayer) ──
+  // Verteidigung T1: Basis-Regeneration (+1 Leben alle 60s) — direkte Entsprechung des ursprünglichen
+  // Multiplayer-Mechanismus, bevor der dort auf Einheiten-Heilung umgebaut wurde (siehe docs/balancing.md).
+  if (hasSpTech('defense', 1)) {
+    lifeRegenAccum += dt;
+    if (lifeRegenAccum >= SP_LIFE_REGEN_INTERVAL_MS) {
+      lifeRegenAccum -= SP_LIFE_REGEN_INTERVAL_MS;
+      if (lives < maxLives) { lives++; updateStats(); }
+    }
+  }
+  // Verteidigung T2: Schild lädt alle 90s auf volle 3 Ladungen nach (wie im Multiplayer).
+  if (hasSpTech('defense', 2)) {
+    shieldAccum += dt;
+    if (shieldAccum >= SP_SHIELD_COOLDOWN_MS && shieldCharges < SP_SHIELD_CHARGES) {
+      shieldAccum -= SP_SHIELD_COOLDOWN_MS;
+      shieldCharges = SP_SHIELD_CHARGES;
+    }
+  }
+  // Angriff T1 "Wachtrupp": automatisch +1 Leben alle 90s, unabhängig vom Kampfgeschehen — Endlos-
+  // Modus-Entsprechung von Lebensklau (das im Multiplayer an gesendete, durchgekommene eigene
+  // Einheiten geknüpft ist — die gibt es im Endlos-Modus nicht).
+  if (hasSpTech('attack', 1)) {
+    lifeGenAccum += dt;
+    if (lifeGenAccum >= SP_LIFE_GEN_INTERVAL_MS) {
+      lifeGenAccum -= SP_LIFE_GEN_INTERVAL_MS;
+      if (lives < maxLives) { lives++; updateStats(); }
+    }
+  }
+  // Wirtschaft T3 "Zinsen": zusätzlich zur normalen Wellenend-Verzinsung laufend +1%/s vom
+  // aktuellen Gold — direkte Entsprechung der Multiplayer-Zinsen-Mechanik.
+  if (hasSpTech('economy', 3)) {
+    gold += gold * SP_INTEREST_RATE_PER_SEC_TIER3 * (dt / 1000);
+  }
 
   // Spawn logic
   if (spawnQueue.length > 0) {
@@ -2111,7 +2312,10 @@ function update(dt) {
       e.x = target.x; e.y = target.y;
       e.wpIndex++;
       if (e.wpIndex >= waypoints.length - 1) {
-        lives -= (e.isBoss ? 5 : (e.radius > 12 ? 3 : 1));
+        // Verteidigung T2 Schild: blockt einen kompletten Leak (wie im Multiplayer "3 Treffer
+        // abfangen" — ein Treffer = eine Ladung, unabhängig von der eigentlichen Lebenskosten-Höhe).
+        if (shieldCharges > 0) { shieldCharges--; }
+        else { lives -= (e.isBoss ? 5 : (e.radius > 12 ? 3 : 1)); }
         enemies = enemies.filter(en => en !== e);
         updateStats();
         if (lives <= 0) { endGame(); }
@@ -2122,11 +2326,11 @@ function update(dt) {
     }
   });
 
-  // Towers fire (effective stats derived from each tower's own tier)
+  // Towers fire (effective stats derived from each tower's own tier + Tech-Tree-Boni)
   towers.forEach(t => {
     t.cooldown -= dt;
     if (t.cooldown > 0) return;
-    const effRange = effectiveRange(t);
+    const effRange = spEffectiveRange(t);
     let target = null, bestScore = -1;
     enemies.forEach(e => {
       const d = Math.hypot(e.x - t.x, e.y - t.y);
@@ -2135,10 +2339,10 @@ function update(dt) {
       if (score > bestScore) { bestScore = score; target = e; }
     });
     if (target) {
-      t.cooldown = effectiveFireRate(t);
+      t.cooldown = spEffectiveFireRate(t);
       projectiles.push({
         x: t.x, y: t.y, target, speed: t.projSpeed,
-        damage: effectiveDamage(t), color: t.color,
+        damage: spEffectiveDamage(t), color: t.color,
         splash: effectiveSplash(t),
         slow: t.slow, slowDuration: t.slowDuration,
       });
@@ -2184,11 +2388,11 @@ function draw() {
     ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
   });
 
-  // buildable hover preview (effective range per tower tier)
+  // buildable hover preview (effective range per tower tier + Tech-Boni)
   towers.forEach(t => {
     ctx.beginPath();
     ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.arc(t.x, t.y, effectiveRange(t), 0, Math.PI*2);
+    ctx.arc(t.x, t.y, spEffectiveRange(t), 0, Math.PI*2);
     ctx.fill();
   });
 
@@ -2239,6 +2443,9 @@ function loop(ts) {
   lastTime = ts;
   update(dt);
   draw();
+  // Gold-Anzeige jeden Frame aktualisieren, nicht nur bei diskreten Events — nötig, weil die
+  // Zinsen-Tech (Wirtschaft T3) das Gold jetzt auch kontinuierlich zwischen den Events verändert.
+  document.getElementById('spGoldVal').textContent = Math.floor(gold);
   if (!gameOver) requestAnimationFrame(loop);
 }
 
@@ -2259,9 +2466,9 @@ function updateTowerInfoPanel() {
   const maxed = t.tier >= TOWER_MAX_TIER;
   document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r})`;
   document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
-  document.getElementById('spTiDamage').textContent = effectiveDamage(t).toFixed(1);
-  document.getElementById('spTiFireRate').textContent = (1000 / effectiveFireRate(t)).toFixed(2) + '/s';
-  document.getElementById('spTiRange').textContent = Math.round(effectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '');
+  document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
+  document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
+  document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '');
   document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
   document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
   const upgradeBtn = document.getElementById('spTiUpgradeBtn');
@@ -2306,18 +2513,30 @@ function sellSelectedTower() {
 }
 
 function showWaveSummary() {
-  const income = waveIncome(wave);
+  // Wirtschaft T1 (Welleneinkommen +20%) und T4 (Perfekte Welle: +50%, falls seit Wellenstart kein
+  // Leben verloren ging) - Port der Multiplayer-Tech-Tree-Stufen 3/4, siehe balance-singleplayer.js
+  // und docs/balancing.md fuer die Begruendung der Neu-Interpretation.
+  let income = waveIncome(wave);
+  if (hasSpTech('economy', 1)) income *= (1 + SP_WAVE_INCOME_BOOST_TIER1);
+  const perfectWave = hasSpTech('economy', 4) && lives >= livesAtWaveStart;
+  if (perfectWave) income *= (1 + SP_PERFECT_WAVE_BONUS_TIER4);
+  income = Math.round(income);
   const interest = Math.min(Math.floor(gold * INTEREST_RATE), INTEREST_CAP);
   gold += income + interest;
+
+  // Tech-Punkte: +1 pro besiegter Boss-Welle (Endlos-Modus-Entsprechung von "+1 Punkt pro
+  // Boss-Kill" im Multiplayer - Boss-Wellen kommen hier alle 5 Wellen statt alle 90s).
+  if (waveType(wave) === 'boss') { techPoints++; }
+
   updateStats();
 
   const nextType = waveType(wave + 1);
   const nextLabel = { boss: '💀 Nächste Welle ist eine BOSS-Welle!', swarm: '🐝 Nächste Welle ist eine Schwarm-Welle.', relief: '😮\u200d💨 Nächste Welle ist eine Verschnaufpause.', normal: '' }[nextType];
-  document.getElementById('spSummaryTitle').textContent = `Welle ${wave} geschafft! 🎉`;
+  document.getElementById('spSummaryTitle').textContent = `Welle ${wave} geschafft! 🎉${perfectWave ? ' ✨ Perfekt!' : ''}`;
   document.getElementById('spSummarySubtitle').textContent = nextLabel || 'Gold-Abrechnung:';
-  document.getElementById('spSumIncome').textContent = `+${income} Gold`;
+  document.getElementById('spSumIncome').textContent = `+${income} Gold${perfectWave ? ' (inkl. Perfekt-Bonus)' : ''}`;
   document.getElementById('spSumInterest').textContent = `+${interest} Gold`;
-  document.getElementById('spSumTotal').textContent = `${gold} Gold`;
+  document.getElementById('spSumTotal').textContent = `${Math.floor(gold)} Gold`;
   document.getElementById('spUpgradeOverlay').style.display = 'flex';
 }
 
@@ -2337,11 +2556,13 @@ function endGame() {
 }
 
 function restartGame() {
-  gold = 220; lives = 20; wave = 1;
+  gold = 220; lives = 20; maxLives = 20; wave = 1;
   towers = []; enemies = []; projectiles = [];
   selectedTowerType = null; waveActive = false; gameOver = false;
   spawnQueue = []; spawnTimer = 0;
   selectedTower = null;
+  techPoints = 0; techPointsBought = 0; tech = { defense: 0, economy: 0, attack: 0 };
+  shieldCharges = 0; shieldAccum = 0; lifeRegenAccum = 0; lifeGenAccum = 0; livesAtWaveStart = 20;
   document.getElementById('spOverlay').style.display = 'none';
   document.getElementById('spUpgradeOverlay').style.display = 'none';
   document.getElementById('spTowerInfo').style.display = 'none';
@@ -2349,6 +2570,71 @@ function restartGame() {
   updateStats();
   setMessage('Neues Spiel gestartet.');
   requestAnimationFrame(loop);
+}
+
+// ── Tech-Tree: Aufbau, Anzeige-Refresh, Freischalten, Punkte kaufen (Port aus dem Multiplayer,
+// siehe buildPalette()/updateUIFromState()/unlockTech()/buyTechPoint() im ersten <script>-Block) ──
+const spTechDiv = document.getElementById('spTechTree');
+SP_TECH_BRANCHES.forEach(branch => {
+  const wrap = document.createElement('div');
+  wrap.className = 'tech-branch';
+  let html = `<div class="tech-branch-title">${SP_TECH_LABELS[branch].name}</div>`;
+  for (let tier = 1; tier <= SP_TECH_MAX_TIER; tier++) {
+    html += `<div class="tech-node" id="sp-tech-${branch}-${tier}" onclick="unlockSpTech('${branch}')">
+      <div class="tech-tier-badge">${tier}</div>
+      <div class="tech-desc">${SP_TECH_LABELS[branch].tiers[tier - 1]}</div>
+      <div class="tech-cost">${spTechPointCost(tier)}P</div>
+    </div>`;
+  }
+  wrap.innerHTML = html;
+  spTechDiv.appendChild(wrap);
+});
+
+function updateSpTechUI() {
+  document.getElementById('spTechPointsLabel').textContent = techPoints;
+  const buyCost = spTechPointBuyCost(techPointsBought + 1);
+  const buyBtn = document.getElementById('spBuyTechPointBtn');
+  buyBtn.textContent = `+1 Tech-Punkt kaufen (${buyCost} Gold)`;
+  buyBtn.disabled = gold < buyCost;
+
+  SP_TECH_BRANCHES.forEach(branch => {
+    const currentTier = tech[branch];
+    for (let tier = 1; tier <= SP_TECH_MAX_TIER; tier++) {
+      const node = document.getElementById(`sp-tech-${branch}-${tier}`);
+      const cost = spTechPointCost(tier);
+      const unlocked = currentTier >= tier;
+      const available = !unlocked && currentTier === tier - 1 && techPoints >= cost;
+      node.classList.toggle('unlocked', unlocked);
+      node.classList.toggle('available', available);
+      node.classList.toggle('locked', !unlocked && !available);
+      node.querySelector('.tech-tier-badge').textContent = unlocked ? '✓' : tier;
+    }
+  });
+}
+
+function unlockSpTech(branch) {
+  if (gameOver) return;
+  const nextTier = tech[branch] + 1;
+  if (nextTier > SP_TECH_MAX_TIER) return;
+  const cost = spTechPointCost(nextTier);
+  if (techPoints < cost) { setMessage('Nicht genug Tech-Punkte. Boss-Wellen besiegen oder Punkte mit Gold kaufen!'); return; }
+  techPoints -= cost;
+  tech[branch] = nextTier;
+  // Verteidigung T4 "Bollwerk": Max-Leben (und aktuelle Leben) einmalig um 5 erhöhen, analog zum
+  // Multiplayer-Bollwerk (siehe hostUnlockTech() im ersten <script>-Block).
+  if (branch === 'defense' && nextTier === 4) { maxLives += SP_BOLLWERK_BONUS_LIVES; lives += SP_BOLLWERK_BONUS_LIVES; }
+  setMessage(`${SP_TECH_LABELS[branch].name} Stufe ${nextTier} freigeschaltet.`);
+  updateStats();
+}
+
+function buySpTechPoint() {
+  if (gameOver) return;
+  const cost = spTechPointBuyCost(techPointsBought + 1);
+  if (gold < cost) { setMessage(`Nicht genug Gold für einen Tech-Punkt (${cost} Gold).`); return; }
+  gold -= cost;
+  techPointsBought++;
+  techPoints++;
+  updateStats();
 }
 
 updateStats();
@@ -2365,6 +2651,9 @@ window.sellSelectedTower = sellSelectedTower;
 window.deselectTower = deselectTower;
 window.restartGame = restartGame;
 window.continueToNextWave = continueToNextWave;
+window.sellAllTowers = sellAllTowers;
+window.unlockSpTech = unlockSpTech;
+window.buySpTechPoint = buySpTechPoint;
 
 })();
 
