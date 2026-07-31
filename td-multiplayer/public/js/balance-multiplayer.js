@@ -101,6 +101,19 @@ function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BA
 // techPriority = feste Reihenfolge, in der Tech-Zweige hochgezogen werden (null = adaptiv, siehe
 // aiPickTechBranch() in index.html). unitUpgradeChance = Wahrscheinlichkeit pro Entscheidungs-Tick,
 // dass die KI statt eines Turms lieber einen Einheiten-Tier upgradet.
+//
+// minSafeTowers = Notfall-Schwelle (siehe aiInEmergency() in index.html): hat die KI weniger als
+// minSafeTowers eigene Türme ODER rollt gerade ein Schwarm gesendeter Spieler-Einheiten an, den die
+// aktuelle Turmzahl absehbar nicht bewältigt, pausiert sie Angriff, Tech-Käufe und Einheiten-
+// Upgrades komplett und steckt ihr gesamtes Gold (Reserve ignoriert) in den eigenen Turmbau/-ausbau,
+// bis die Gefahr vorbei ist. Ohne das würde z.B. der Weltenender bei einem sehr frühen, harten Rush
+// des Spielers einfach weiter maximal aggressiv senden und nie eine eigene Verteidigung aufbauen -
+// "maximal aggressiv" soll aber "so aggressiv wie sicher möglich" heißen, nicht "blind aggressiv".
+// emergencyLivesRatio ist NUR ein Rückfall für echte Lebensgefahr unabhängig von der Ursache (sehr
+// niedrig angesetzt) - bewusst NICHT der Haupt-Auslöser, weil Boss-Wellen (alle 90s, treffen beide
+// Seiten unabhängig vom Spielverhalten) sonst denselben Notfallmodus auslösen würden wie ein
+// Spieler-Rush und die KI ihre Verteidigung künstlich klein halten würde, obwohl die normale,
+// mit der Bossrunde wachsende Ziel-Turmzahl Bosse eigentlich schon abdeckt.
 const AI_PROFILES = {
   beginner: {
     label: 'Anfänger',
@@ -119,6 +132,10 @@ const AI_PROFILES = {
     unitUpgradeChance: 0.20,
     upgradeTowerShare: 0.5,
     adaptive: false,
+    // Reagiert am trägsten auf Gefahr (passt zu "Grundlogik") - erst ab wenigen Türmen oder
+    // ordentlichem Lebensverlust wird überhaupt umgeschaltet.
+    minSafeTowers: 4,
+    emergencyLivesRatio: 0.30,
   },
   challenger: {
     label: 'Herausforderer',
@@ -136,6 +153,8 @@ const AI_PROFILES = {
     unitUpgradeChance: 0.35,
     upgradeTowerShare: 0.5,
     adaptive: false,
+    minSafeTowers: 5,
+    emergencyLivesRatio: 0.35,
   },
   worldender: {
     label: 'Weltenender',
@@ -154,5 +173,11 @@ const AI_PROFILES = {
     unitUpgradeChance: 0.45,
     upgradeTowerShare: 0.6,
     adaptive: true,
+    // Reagiert am schnellsten & frühesten auf Gefahr (höchste Schwelle, schnellster
+    // decisionIntervalMs) - "perfekt reagieren" heißt auch: merkt eine Bedrohung, bevor sie
+    // wirklich gefährlich wird, verteidigt kurz gezielt, und geht danach sofort wieder in volle
+    // Aggression über, sobald die Basis wieder sicher ist.
+    minSafeTowers: 6,
+    emergencyLivesRatio: 0.40,
   },
 };

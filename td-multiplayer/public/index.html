@@ -1139,7 +1139,7 @@ function hostSetReady(ready, forGuest) {
 function hostRematch() {
   const fresh = freshState();
   Object.assign(state, fresh);
-  if (aiMode) { state.p2Ready = true; aiDecisionAccum = 0; aiSendAccum = 0; } // KI ist beim Rematch sofort wieder bereit
+  if (aiMode) { state.p2Ready = true; aiDecisionAccum = 0; aiSendAccum = 0; aiPanic = false; } // KI ist beim Rematch sofort wieder bereit
 }
 function hostUpgradeUnit(key, forGuest) {
   const tiers = forGuest ? state.p2UnitTiers : state.p1UnitTiers;
@@ -1416,7 +1416,7 @@ function startAiMatch(difficulty) {
   roomCode = null;
   myRole = 'p1'; isHost = true;
   aiMode = true; aiDifficulty = difficulty;
-  aiDecisionAccum = 0; aiSendAccum = 0;
+  aiDecisionAccum = 0; aiSendAccum = 0; aiPanic = false;
   state = freshState();
   hostSetReady(true, true); // KI ist immer sofort bereit, es muss nur der Mensch noch bestätigen
   enterGame();
@@ -1528,28 +1528,93 @@ function aiUpgradeCheapestUnitTier(profile) {
   if (state.p2Gold - cost >= state.p2Gold * profile.reserveGoldRatio) hostUpgradeUnit(key, true);
 }
 
-function aiDecide(profile) {
-  // 1) Verfügbare Tech-Punkte einsetzen
-  if (state.p2TechPoints > 0) {
-    const branch = profile.adaptive ? aiPickTechBranch(state.p2Tech) : profile.techPriority.find(b => state.p2Tech[b] < TECH_MAX_TIER);
-    if (branch) hostUnlockTech(branch, true);
-  }
-  // 2) Tech-Punkt mit Gold kaufen, wenn danach immer noch komfortabel Gold übrig bleibt
-  const buyCost = techPointBuyCost(state.p2TechPointsBought + 1);
-  if (state.p2Gold - buyCost >= profile.techBuyThresholdGold) hostBuyTechPoint(true);
-
-  // 3) Wirtschaft: Minen bis Zielanzahl bauen
-  const mineCount = state.p2Structures.filter(s => s.type === 'mine').length;
-  const targetMines = Math.round(profile.targetMinesBase + profile.targetMinesPerBossRound * state.bossRound);
-  const reserve = state.p2Gold * profile.reserveGoldRatio;
-  if (mineCount < targetMines && state.p2Gold - TOWER_TYPES.mine.cost >= reserve) {
-    const spot = aiFindBuildSpot();
-    if (spot) hostBuild('mine', spot.c, spot.r, true);
-  }
-
-  // 4) Verteidigung: Türme bis Zielanzahl bauen, danach vorhandene upgraden
+// Akute Gefahr: zu wenig eigene Türme ODER gerade ein Schwarm gesendeter Spieler-Einheiten im
+// Anflug, den die aktuelle Turmzahl absehbar nicht bewältigt. Dann pausiert die KI Angriff/Tech-
+// Käufe/Einheiten-Upgrades komplett und wirft ihr gesamtes Gold (Reserve ignoriert) in den
+// Turmbau/-ausbau, statt stur weiter "maximal aggressiv" zu spielen. Verhindert, dass z.B. der
+// Weltenender bei einem sehr frühen, harten Rush des Spielers einfach nie eine eigene Verteidigung
+// aufbaut, weil er sein Gold komplett in Einheiten steckt.
+//
+// Bewusst NICHT einfach an "eigene Leben gesunken" gekoppelt: Boss-Wellen (alle 90s, treffen beide
+// Seiten unabhängig vom Spielerverhalten) kosten planmäßig auch mal Leben - das deckt schon die
+// normale, mit der Bossrunde wachsende Ziel-Turmzahl ab (siehe Balancing-Doc, "Boss-HP herleiten").
+// Würde jeder Boss-Treffer denselben Notfallmodus auslösen wie ein Spieler-Rush, würde die KI ihre
+// Verteidigung künstlich auf minSafeTowers klein halten und nie zur vollen, für Bosse eigentlich
+// ausreichenden Ausbaustufe kommen - das war ein echter Bug in einer früheren Version dieser Logik
+// (KI verlor gegen einen rein verteidigenden, nie angreifenden Test-Gegner an Boss-Chipschaden).
+// state.p2MaxLives-basierter nearDeath-Wert bleibt als reiner Rückfall für echte Lebensgefahr
+// unabhängig von der Ursache erhalten, aber deutlich niedriger angesetzt als früher.
+//
+// Mit Hysterese (aiPanic): ohne die würde die KI bei jedem kurzen Nachlassen des Schwarms sofort
+// wieder auf volle Aggression umschalten und dann erneut einbrechen, sobald der Spieler weiter
+// Druck macht - sie "flattert" zwischen Panik und voller Offensive, statt die Verteidigung wirklich
+// zu stabilisieren.
+let aiPanic = false;
+function aiInEmergency(profile) {
   const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
-  const targetTowers = Math.round(profile.targetTowersBase + profile.targetTowersPerBossRound * state.bossRound);
+  if (towerCount < profile.minSafeTowers) { aiPanic = true; return true; }
+
+  const incomingPlayerUnits = state.unitsOnLaneP2.filter(u => !u.isBoss).length;
+  const swarmed = incomingPlayerUnits > towerCount * 2; // mehr anrollende Einheiten als die Türme realistisch gleichzeitig bewältigen
+  const nearDeath = state.p2Lives <= state.p2MaxLives * profile.emergencyLivesRatio; // echter Rückfall, unabhängig von der Ursache
+  if (swarmed || nearDeath) { aiPanic = true; return true; }
+
+  // Hysterese: erst wieder raus, wenn der Ansturm klar abgeklungen ist (nicht schon beim ersten
+  // Moment mit etwas weniger Druck).
+  if (aiPanic && incomingPlayerUnits > towerCount) return true;
+  aiPanic = false;
+  return false;
+}
+
+// Kontinuierliches Bedrohungsmaß (0 = ganz sicher, 1 = voller Notfall) - reagiert wie aiInEmergency
+// auf den tatsächlichen ankommenden Spieler-Schwarm relativ zur eigenen Turmzahl, nicht auf Boss-
+// Chipschaden. Lässt die Offensive schon VOR dem harten Notfall sanft abklingen, statt erst
+// abrupt zu bremsen und danach sofort wieder auf Vollgas zu schalten.
+function aiThreatLevel(profile) {
+  const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
+  if (towerCount === 0) return 1;
+  const incomingPlayerUnits = state.unitsOnLaneP2.filter(u => !u.isBoss).length;
+  return Math.max(0, Math.min(1, incomingPlayerUnits / (towerCount * 2)));
+}
+
+function aiDecide(profile) {
+  const emergency = aiInEmergency(profile);
+  // Bedrohungsmaß auch außerhalb des harten Notfalls: dämpft Reserve-Ausgaben für Tech/Wirtschaft
+  // proportional, damit die KI schon vorsorglich vorsichtiger wird, bevor die Lage wirklich kippt,
+  // statt bis zur letzten Sekunde unverändert aggressiv zu wirtschaften und dann hart umzuschalten.
+  const threat = emergency ? 1 : aiThreatLevel(profile);
+
+  // 1) Verfügbare Tech-Punkte einsetzen + 2) Tech-Punkt mit Gold kaufen - im Notfall pausiert,
+  // damit kein Gold an der Verteidigung vorbeigeht.
+  if (!emergency) {
+    if (state.p2TechPoints > 0) {
+      const branch = profile.adaptive ? aiPickTechBranch(state.p2Tech) : profile.techPriority.find(b => state.p2Tech[b] < TECH_MAX_TIER);
+      if (branch) hostUnlockTech(branch, true);
+    }
+    const buyCost = techPointBuyCost(state.p2TechPointsBought + 1);
+    if (state.p2Gold - buyCost >= profile.techBuyThresholdGold * (1 + threat * 2)) hostBuyTechPoint(true);
+  }
+
+  // 3) Wirtschaft: Minen bis Zielanzahl bauen - im Notfall ebenfalls pausiert (Türme statt Minen).
+  const reserve = emergency ? 0 : state.p2Gold * profile.reserveGoldRatio * (1 - threat * 0.8);
+  if (!emergency) {
+    const mineCount = state.p2Structures.filter(s => s.type === 'mine').length;
+    const targetMines = Math.round(profile.targetMinesBase + profile.targetMinesPerBossRound * state.bossRound);
+    if (mineCount < targetMines && state.p2Gold - TOWER_TYPES.mine.cost >= reserve) {
+      const spot = aiFindBuildSpot();
+      if (spot) hostBuild('mine', spot.c, spot.r, true);
+    }
+  }
+
+  // 4) Verteidigung: Türme bis Zielanzahl bauen, danach vorhandene upgraden. Im Notfall gilt NUR
+  // minSafeTowers als Ziel (statt des vollen, mit der Bossrunde wachsenden Zielwerts) - im Notfall
+  // zählt schnell eine kleine, erreichbare Anzahl Türme zu erreichen und die dann SOFORT hoch
+  // aufzurüsten (echte DPS), statt endlos neue Tier-0-Türme zu bauen und nie zum Aufrüsten zu
+  // kommen, weil das reguläre Ziel mit der Zeit immer weiter mitwächst.
+  const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
+  const targetTowers = emergency
+    ? profile.minSafeTowers
+    : Math.round(profile.targetTowersBase + profile.targetTowersPerBossRound * state.bossRound);
   const towerWeights = profile.adaptive ? aiAdaptiveTowerWeights() : profile.towerWeights;
   if (towerCount < targetTowers) {
     const key = aiWeightedPick(towerWeights, k => state.p2Gold - TOWER_TYPES[k].cost >= reserve);
@@ -1558,16 +1623,30 @@ function aiDecide(profile) {
       if (spot) hostBuild(key, spot.c, spot.r, true);
     }
   } else {
-    aiUpgradeCheapestTowers(Math.max(0, state.p2Gold - reserve) * profile.upgradeTowerShare);
+    // Auch der Upgrade-Anteil steigt mit der Bedrohung, statt starr bei upgradeTowerShare zu bleiben.
+    const share = Math.min(1, profile.upgradeTowerShare + threat * (1 - profile.upgradeTowerShare));
+    const upgradeBudget = emergency ? state.p2Gold : Math.max(0, state.p2Gold - reserve) * share;
+    aiUpgradeCheapestTowers(upgradeBudget);
   }
 
-  // 5) Gelegentlich eigene Einheiten-Tiers hochziehen, statt immer nur neue Türme/Minen
-  if (Math.random() < profile.unitUpgradeChance) aiUpgradeCheapestUnitTier(profile);
+  // 5) Gelegentlich eigene Einheiten-Tiers hochziehen, statt immer nur neue Türme/Minen - im
+  // Notfall pausiert (Gold bleibt für die eigene Verteidigung reserviert).
+  if (!emergency && Math.random() < profile.unitUpgradeChance * (1 - threat)) aiUpgradeCheapestUnitTier(profile);
 }
 
 function aiConsiderSending(profile) {
+  // Verteidigung geht vor Angriff, solange die eigene Basis akut gefährdet ist - "maximal
+  // aggressiv" heißt "so aggressiv wie sicher möglich", nicht "sendet auch dann noch, wenn die
+  // eigene Verteidigung gerade zusammenbricht".
+  if (aiInEmergency(profile)) return;
+  // Auch außerhalb des harten Notfalls: je näher die Leben an der Notfall-Schwelle sind, desto
+  // weniger Einheiten pro Salve - sanftes Abbremsen statt "voll aggressiv bis zum Kollaps, dann
+  // Vollbremsung". Ohne das würde die KI bei dauerhaftem Druck ständig zwischen Panik und voller
+  // Offensive hin- und herspringen und dabei nie eine stabile Verteidigung aufbauen.
+  const threat = aiThreatLevel(profile);
+  const burst = Math.max(1, Math.round(profile.sendBurst * (1 - threat * 0.75)));
   const unitWeights = profile.adaptive ? aiAdaptiveUnitWeights() : profile.unitWeights;
-  for (let i = 0; i < profile.sendBurst; i++) {
+  for (let i = 0; i < burst; i++) {
     if (!canSend(state.p2SendTimes, sendLimitFor(state.p2Tech))) break;
     const key = aiWeightedPick(unitWeights, k => {
       const u = UNIT_TYPES[k];
