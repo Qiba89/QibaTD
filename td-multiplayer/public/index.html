@@ -134,6 +134,17 @@
   .pick-btn .info { flex: 1; }
   .pick-btn .name { font-weight: 600; }
   .pick-btn .cost { color: var(--accent); font-size: 11px; }
+  .build-row { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
+  .build-row .pick-btn { margin-bottom: 0; flex: 1; }
+  .upgrade-all-btn {
+    flex: 0 0 56px; border: 2px solid transparent; border-radius: 8px; background: #232b34;
+    color: var(--accent2); font-size: 11px; font-weight: 700; cursor: pointer;
+  }
+  .upgrade-all-btn:hover { border-color: var(--accent2); }
+  .sell-all-btn {
+    width: 100%; padding: 8px; margin-bottom: 10px; border: none; border-radius: 6px;
+    background: var(--danger); color: #2a0000; font-weight: 700; font-size: 12px; cursor: pointer;
+  }
 
   button.send-btn {
     width: 100%; padding: 8px 10px; margin-bottom: 8px; background: #232b34;
@@ -467,6 +478,7 @@
   <div class="controls" style="display:none;">
     <div class="panel">
       <h3>Bauen (deine Seite)</h3>
+      <button class="sell-all-btn" id="sellAllBtn" onclick="sellAllTowers()">🗑 Alle Türme verkaufen</button>
       <div id="buildButtons"></div>
       <div id="towerInfo">
         <div class="ti-title" id="tiTitle"></div>
@@ -761,13 +773,24 @@ function buildPalette() {
   const buildDiv = document.getElementById('buildButtons');
   BUILD_ORDER.forEach(key => {
     const t = TOWER_TYPES[key];
+    const row = document.createElement('div');
+    row.className = 'build-row';
     const btn = document.createElement('button');
     btn.className = 'pick-btn'; btn.id = 'build-' + key;
     const sub = key === 'mine' ? '+6 Gold/s' : `${t.damage} Dmg`;
     btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
       <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold — ${sub}</div></div>`;
     btn.onclick = () => selectBuildType(key);
-    buildDiv.appendChild(btn);
+    row.appendChild(btn);
+
+    const upgAllBtn = document.createElement('button');
+    upgAllBtn.className = 'upgrade-all-btn'; upgAllBtn.id = 'upgrade-all-' + key;
+    upgAllBtn.title = `Alle ${t.name}-Türme um eine Stufe upgraden (soweit Gold reicht)`;
+    upgAllBtn.textContent = '⬆ Alle';
+    upgAllBtn.onclick = () => upgradeAllOfType(key);
+    row.appendChild(upgAllBtn);
+
+    buildDiv.appendChild(row);
   });
   const sendDiv = document.getElementById('sendButtons');
   Object.entries(UNIT_TYPES).forEach(([key, u]) => {
@@ -847,6 +870,24 @@ document.getElementById('myCanvas').addEventListener('click', (e) => {
   }
 });
 
+// Doppelklick auf einen bestehenden Turm: direkt upgraden, ohne erst das Panel zu öffnen.
+document.getElementById('myCanvas').addEventListener('dblclick', (e) => {
+  if (!state || state.phase !== 'playing') return;
+  const canvas = e.currentTarget;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const { c, r } = cellFromPixel(x, y);
+  const myStructures = isHost ? state.p1Structures : state.p2Structures;
+  const existing = myStructures.find(s => s.c === c && s.r === r);
+  if (existing) {
+    selectedBuildType = null;
+    document.querySelectorAll('.pick-btn').forEach(b => b.classList.remove('selected'));
+    selectStructure(existing);
+    upgradeSelected();
+  }
+});
+
 function selectStructure(obj) { selectedStructure = obj; updateInfoPanel(); }
 function deselect() { selectedStructure = null; document.getElementById('towerInfo').style.display = 'none'; }
 function setSelectedPriority(p) {
@@ -868,6 +909,17 @@ function sellSelected() {
   if (isHost) { hostSell(selectedStructure.c, selectedStructure.r); }
   else { queueAction({ type: 'sell', c: selectedStructure.c, r: selectedStructure.r }); }
   deselect();
+}
+function sellAllTowers() {
+  if (!state || state.phase !== 'playing') return;
+  deselect();
+  if (isHost) { hostSellAll(); }
+  else { queueAction({ type: 'sellAll' }); }
+}
+function upgradeAllOfType(buildType) {
+  if (!state || state.phase !== 'playing') return;
+  if (isHost) { hostUpgradeAllOfType(buildType); }
+  else { queueAction({ type: 'upgradeAllOfType', buildType }); }
 }
 let mySendTimes = []; // clientseitiger Spiegel des Sende-Limits, für sofortiges Feedback
 function clientCanSend() {
@@ -1015,6 +1067,25 @@ function hostSell(c, r, forGuest) {
   const refund = Math.floor(s.cost * 0.6);
   if (forGuest) { state.p2Gold += refund; state.p2Structures = state.p2Structures.filter(x => x !== s); }
   else { state.p1Gold += refund; state.p1Structures = state.p1Structures.filter(x => x !== s); }
+}
+function hostSellAll(forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  const refund = structs.reduce((sum, s) => sum + Math.floor(s.cost * 0.6), 0);
+  if (forGuest) { state.p2Gold += refund; state.p2Structures = []; }
+  else { state.p1Gold += refund; state.p1Structures = []; }
+}
+function hostUpgradeAllOfType(buildType, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  // Günstigste Upgrades zuerst (niedrigste aktuelle Stufe), damit das Gold möglichst
+  // viele Türme dieses Typs anhebt statt nur einen einzelnen bis ans Limit zu pumpen.
+  const candidates = structs.filter(s => s.type === buildType && s.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier);
+  for (const s of candidates) {
+    const cost = tierUpgradeCost(s.tier + 1);
+    const gold = forGuest ? state.p2Gold : state.p1Gold;
+    if (gold < cost) break; // aufsteigend sortiert: wenn diese (günstigste) Stufe nicht mehr leistbar ist, sind es die teureren erst recht nicht
+    if (forGuest) state.p2Gold -= cost; else state.p1Gold -= cost;
+    s.tier++;
+  }
 }
 function hostSetPriority(c, r, priority, forGuest) {
   const structs = forGuest ? state.p2Structures : state.p1Structures;
@@ -1256,6 +1327,8 @@ function applyHostAction(a) {
   if (a.type === 'build') hostBuild(a.buildType, a.c, a.r, true);
   else if (a.type === 'upgrade') hostUpgrade(a.c, a.r, true);
   else if (a.type === 'sell') hostSell(a.c, a.r, true);
+  else if (a.type === 'sellAll') hostSellAll(true);
+  else if (a.type === 'upgradeAllOfType') hostUpgradeAllOfType(a.buildType, true);
   else if (a.type === 'priority') hostSetPriority(a.c, a.r, a.priority, true);
   else if (a.type === 'send') hostSendUnit(a.unitType, true);
   else if (a.type === 'upgradeUnit') hostUpgradeUnit(a.unitType, true);
@@ -1375,7 +1448,14 @@ function updateUIFromState() {
   document.getElementById('bossTimerVal').textContent = Math.max(0, Math.ceil(state.bossTimer / 1000));
   document.getElementById('bossRoundVal').textContent = state.bossRound;
 
-  BUILD_ORDER.forEach(key => { document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1'; });
+  BUILD_ORDER.forEach(key => {
+    document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1';
+    const cheapestNext = myStructs.filter(s => s.type === key && s.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier)[0];
+    const upgAllBtn = document.getElementById('upgrade-all-' + key);
+    upgAllBtn.disabled = !cheapestNext || myGold < tierUpgradeCost(cheapestNext.tier + 1);
+  });
+  document.getElementById('sellAllBtn').style.opacity = myStructs.length ? '1' : '0.5';
+  document.getElementById('sellAllBtn').disabled = myStructs.length === 0;
   Object.keys(UNIT_TYPES).forEach(key => {
     const u = UNIT_TYPES[key];
     const block = document.getElementById('unit-block-' + key);
