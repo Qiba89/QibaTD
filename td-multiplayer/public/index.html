@@ -252,9 +252,15 @@
     35% { transform: scale(1.7); color: #fff; }
     100% { transform: scale(1); color: var(--accent); }
   }
-  #singleplayerMode .sp-wave-row { display: flex; gap: 6px; }
-  #singleplayerMode .sp-wave-row .sp-action { flex: 1; margin-top: 6px; }
-  #singleplayerMode .sp-pause-btn { flex: 0 0 44px !important; padding: 10px 0 !important; font-size: 16px; }
+  /* Nachtrag (Popup-Entfernung): ersetzt das alte Overlay-Banner - ruhiger Fließtext unter der
+     großen Wellenzahl, immer sichtbar, nie blockierend, kein Klick nötig. */
+  #singleplayerMode #spWaveSub {
+    font-size: 12px;
+    color: #aab3bd;
+    min-height: 16px;
+    text-align: center;
+    max-width: 460px;
+  }
   #singleplayerMode #spGameCanvas {
     background: var(--grass);
     border-radius: 10px;
@@ -336,61 +342,6 @@
   }
   #singleplayerMode #spOverlay h2 { font-size: 32px; margin-bottom: 8px; }
   #singleplayerMode #spOverlay p { color: #aab3bd; margin-bottom: 20px; }
-  #singleplayerMode #spUpgradeOverlay {
-    /* Bewusst KEIN fullscreen-Modal mehr (war vorher position:fixed;inset:0 mit dunklem Backdrop) -
-       seit dem automatischen Wellenstart soll die Zusammenfassung den Spieler nicht mehr blockieren:
-       er soll währenddessen weiter Türme bauen/upgraden können, sonst bringt der Countdown nichts.
-       Stattdessen ein kleines, nicht-blockierendes Banner über dem oberen Spielfeldrand
-       (position:absolute relativ zu .sp-canvas-col, das selbst position:relative hat). */
-    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-    background: rgba(15,20,26,0.94);
-    border: 1px solid var(--accent);
-    border-radius: 10px;
-    padding: 12px 20px;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    min-width: 220px;
-    z-index: 5;
-  }
-  #singleplayerMode #spUpgradeOverlay h2 { font-size: 18px; margin-bottom: 2px; color: var(--accent); }
-  #singleplayerMode #spUpgradeOverlay p { color: #aab3bd; margin-bottom: 8px; font-size: 12px; }
-  #singleplayerMode .sp-upgrade-choices {
-    display: flex;
-    gap: 14px;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: 640px;
-  }
-  #singleplayerMode .sp-upgrade-card {
-    width: 170px;
-    background: var(--panel);
-    border: 2px solid #2c333c;
-    border-radius: 10px;
-    padding: 16px 12px;
-    text-align: center;
-    cursor: pointer;
-  }
-  #singleplayerMode .sp-upgrade-card:hover { border-color: var(--accent2); background: #232c36; }
-  #singleplayerMode .sp-upgrade-card .icon { font-size: 30px; margin-bottom: 8px; }
-  #singleplayerMode .sp-upgrade-card .title { font-weight: 700; margin-bottom: 4px; }
-  #singleplayerMode .sp-upgrade-card .desc { font-size: 12px; color: #aab3bd; }
-  #singleplayerMode .sp-upgrade-level {
-    margin-top: 10px;
-    font-size: 12px;
-    color: var(--accent2);
-  }
-  #singleplayerMode .sp-summary-row {
-    display: flex;
-    justify-content: space-between;
-    width: 280px;
-    font-size: 14px;
-    padding: 6px 4px;
-    border-bottom: 1px solid #2c333c;
-  }
-  #singleplayerMode .sp-summary-row b { color: var(--accent); }
-  #singleplayerMode .sp-summary-row.sp-total { border-bottom: none; font-weight: 700; margin-top: 4px; }
   #singleplayerMode #spTowerInfo {
     background: #10151b;
     border: 1px solid #2c333c;
@@ -600,16 +551,10 @@
   <div class="sp-canvas-col">
     <canvas id="spGameCanvas" width="720" height="480"></canvas>
     <div id="spWaveBig">Welle <span id="spWaveBigNum">1</span></div>
-
-    <div id="spUpgradeOverlay">
-      <h2 id="spSummaryTitle">Welle geschafft! 🎉</h2>
-      <p id="spSummarySubtitle">Gold-Abrechnung:</p>
-      <div class="sp-summary-row"><span>Passives Einkommen</span><b id="spSumIncome"></b></div>
-      <div class="sp-summary-row"><span>Zinsen</span><b id="spSumInterest"></b></div>
-      <div class="sp-summary-row sp-total"><span>Neuer Kontostand</span><b id="spSumTotal"></b></div>
-      <div class="sp-summary-row"><span>Nächste Welle in</span><b id="spAutoNextCountdown"></b></div>
-      <button class="sp-action" style="width:200px;margin-top:10px" onclick="advanceToNextWave()">Jetzt starten ▶</button>
-    </div>
+    <!-- Nachtrag (Popup-Entfernung): ersetzt das alte #spUpgradeOverlay-Banner. Reiner Fließtext,
+         kein Klick nötig, blockiert nie die Sicht aufs Feld - Wellen-Abrechnung und Countdown zur
+         nächsten (automatisch startenden) Welle laufen komplett im Hintergrund mit. -->
+    <div id="spWaveSub"></div>
   </div>
 
   <div class="sp-panel">
@@ -641,11 +586,12 @@
       </div>
     </div>
 
-    <div class="sp-wave-row">
-      <button class="sp-action" id="spWaveBtn">Welle starten ▶</button>
-      <button class="sp-action sp-pause-btn" id="spPauseBtn" title="Spiel pausieren">⏸</button>
-    </div>
-    <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen. Doppelklick auf einen eigenen Turm upgradet ihn direkt.</div>
+    <!-- Nachtrag (Popup-Entfernung): "Welle starten ▶" entfällt - Welle 1 startet automatisch beim
+         Betreten des Endlos-Modus (siehe startSingleplayerMode()) und jede weitere Welle genauso
+         (advanceToNextWave(), automatisch getriggert). Einzige verbleibende manuelle Kontrolle ist
+         Pause, für alles andere muss nie mehr geklickt werden. -->
+    <button class="sp-action" id="spPauseBtn" title="Spiel pausieren">⏸ Pause</button>
+    <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen. Doppelklick auf einen eigenen Turm upgradet ihn direkt. Wellen starten automatisch.</div>
   </div>
 
   <div class="sp-panel">
@@ -943,7 +889,9 @@ function selectBuildType(key) {
     if (myStructs.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
   }
   deselect();
-  selectedBuildType = (selectedBuildType === key) ? null : key;
+  // Nachtrag (Bugfix, analog zu selectTower() im Endlos-Modus): nicht mehr abwählen, wenn derselbe
+  // Typ erneut angeklickt wird - siehe Kommentar dort für die Begründung.
+  selectedBuildType = key;
   document.querySelectorAll('.pick-btn').forEach(b => b.classList.remove('selected'));
   if (selectedBuildType) document.getElementById('build-' + selectedBuildType).classList.add('selected');
 }
@@ -2115,8 +2063,12 @@ let spawnQueue = [];
 let spawnTimer = 0;
 let selectedTower = null; // currently selected placed tower (for upgrade/sell panel)
 let paused = false;         // Pause-Button: friert update(dt) komplett ein (siehe update() unten)
-let autoNextPending = false; // true zwischen Wellenzusammenfassung und automatischem/manuellem Start der nächsten Welle
+let autoNextPending = false; // true zwischen Wellenzusammenfassung und automatischem Start der nächsten Welle
 let autoNextTimer = 0;      // ms bis zum automatischen Start (siehe SP_AUTO_NEXT_WAVE_DELAY_MS/_BOSS_MS)
+// Nachtrag (Popup-Entfernung): statischer Teil des #spWaveSub-Texts (Gold-Abrechnung + Vorschau
+// auf den nächsten Wellentyp), einmalig in showWaveSummary() gesetzt. Der Countdown in update()
+// hängt pro Tick nur noch die Restsekunden an, statt das komplette Banner/Popup zu ersetzen.
+let waveSummaryText = '';
 
 // ── Tech-Tree-Zustand (Port aus dem Multiplayer, siehe balance-singleplayer.js
 // für SP_TECH_LABELS/SP_TECH_BRANCHES und docs/balancing.md für die Begründung
@@ -2190,7 +2142,11 @@ function selectTower(key) {
     return;
   }
   deselectTower();
-  selectedTowerType = (selectedTowerType === key) ? null : key;
+  // Nachtrag (Bugfix): NICHT mehr abwählen, wenn der bereits ausgewählte Typ erneut angeklickt wird.
+  // Vorher toggelte ein zweiter Klick auf denselben Button die Auswahl auf null - beim naheliegenden
+  // Muster "vor jedem Turmbau nochmal auf den Button klicken" führte das dazu, dass der Klick auf die
+  // Karte danach ins Leere lief (kein Turm wird gebaut) und der Nutzer nur "nichts passiert" sah.
+  selectedTowerType = key;
   document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
   if (selectedTowerType) document.getElementById('btn-' + key).classList.add('sp-selected');
 }
@@ -2357,37 +2313,27 @@ function makeWaveEnemies(w) {
   return list;
 }
 
-// startWave(): spawnt die aktuelle `wave` — genutzt sowohl vom allerersten, manuellen Klick auf
-// "Welle starten" (Spielbeginn, wave noch nicht erhöht) als auch von advanceToNextWave() (nachdem
-// wave dort schon hochgezählt wurde). Vorher war das zweimal fast identischer Code (im Klick-Handler
-// und in continueToNextWave()) — jetzt eine gemeinsame Stelle, siehe docs/balancing.md, Abschnitt
-// "Automatischer Wellenstart".
+// startWave(): spawnt die aktuelle `wave` — genutzt sowohl vom allerersten automatischen Start
+// (Spielbeginn, siehe startSingleplayerMode(), wave noch nicht erhöht) als auch von
+// advanceToNextWave() (nachdem wave dort schon hochgezählt wurde). Seit dem Popup-Entfernungs-
+// Nachtrag gibt es dafür keinen manuellen Klick mehr - siehe docs/balancing.md, Abschnitt
+// "Automatischer Wellenstart" / "Popup-Entfernung, zero-click Wellenfluss".
 function startWave() {
   spawnQueue = makeWaveEnemies(wave);
   spawnTimer = 0;
   waveActive = true;
   livesAtWaveStart = lives; // für "Perfekte Welle" (Wirtschaft T4) — kein Lebensverlust während der Welle
-  const btn = document.getElementById('spWaveBtn');
-  btn.textContent = 'Welle läuft…';
-  btn.disabled = true;
+  waveSummaryText = '';
+  document.getElementById('spWaveSub').textContent = '';
   const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', normal: '' };
   setMessage(`Welle ${wave} gestartet!${labels[waveType(wave)]}`);
 }
-
-document.getElementById('spWaveBtn').addEventListener('click', () => {
-  if (waveActive || gameOver || paused) return;
-  // Während des Auto-Countdowns fungiert derselbe Button als "Jetzt starten"-Skip (siehe
-  // advanceToNextWave()); beim allerersten Spielstart (kein Countdown aktiv) startet er stattdessen
-  // direkt die aktuelle Welle.
-  if (autoNextPending) advanceToNextWave();
-  else startWave();
-});
 
 document.getElementById('spPauseBtn').addEventListener('click', () => {
   if (gameOver) return;
   paused = !paused;
   const btn = document.getElementById('spPauseBtn');
-  btn.textContent = paused ? '▶' : '⏸';
+  btn.textContent = paused ? '▶ Fortsetzen' : '⏸ Pause';
   btn.title = paused ? 'Fortsetzen' : 'Spiel pausieren';
   if (paused) setMessage('Pausiert.');
 });
@@ -2410,10 +2356,13 @@ function update(dt) {
   // Auto-Wellenstart-Countdown (Nachtrag): läuft, während der Spieler zwischen zwei Wellen Zeit hat,
   // sich vorzubereiten. Siehe docs/balancing.md, Abschnitt "Automatischer Wellenstart" für die
   // Begründung der Dauer (6s normal, 9s vor Boss-Wellen) und advanceToNextWave() weiter unten.
+  // Popup-Entfernung: statt eines eigenen Countdown-Feldes im (jetzt entfernten) Banner hängt der
+  // Countdown pro Tick an den statischen Abrechnungstext (waveSummaryText, siehe showWaveSummary())
+  // im ruhigen #spWaveSub-Fließtext unter der Karte an - komplett ohne Interaktion.
   if (autoNextPending) {
     autoNextTimer -= dt;
-    const countdownEl = document.getElementById('spAutoNextCountdown');
-    if (countdownEl) countdownEl.textContent = `${Math.max(0, Math.ceil(autoNextTimer / 1000))}s`;
+    const subEl = document.getElementById('spWaveSub');
+    if (subEl) subEl.textContent = `${waveSummaryText} Nächste Welle in ${Math.max(0, Math.ceil(autoNextTimer / 1000))}s…`;
     if (autoNextTimer <= 0) advanceToNextWave();
   }
 
@@ -2462,13 +2411,10 @@ function update(dt) {
     waveActive = false;
     showWaveSummary();
     // Automatischer Wellenstart: Countdown-Dauer hängt vom NÄCHSTEN Wellentyp ab (Boss-Wellen kriegen
-    // mehr Vorlauf, siehe SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS oben). Button bleibt währenddessen als
-    // "Jetzt starten"-Skip nutzbar (siehe Klick-Handler oben).
+    // mehr Vorlauf, siehe SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS oben). Läuft seit dem Popup-Entfernungs-
+    // Nachtrag komplett ohne UI-Element, das geklickt werden müsste.
     autoNextPending = true;
     autoNextTimer = waveType(wave + 1) === 'boss' ? SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS : SP_AUTO_NEXT_WAVE_DELAY_MS;
-    const btn = document.getElementById('spWaveBtn');
-    btn.disabled = false;
-    btn.textContent = 'Jetzt starten ▶';
   }
 
   // Move enemies
@@ -2727,14 +2673,13 @@ function showWaveSummary() {
 
   updateStats();
 
+  // Nachtrag (Popup-Entfernung): keine eigene Overlay-/Banner-Anzeige mehr - die Abrechnung laeuft
+  // als ruhiger Fliesstext in #spWaveSub unter der Karte mit (waveSummaryText, wird in update() pro
+  // Countdown-Tick um die Restsekunden ergaenzt), komplett ohne Klick oder Sichtblockade.
   const nextType = waveType(wave + 1);
   const nextLabel = { boss: '💀 Nächste Welle ist eine BOSS-Welle!', swarm: '🐝 Nächste Welle ist eine Schwarm-Welle.', relief: '😮\u200d💨 Nächste Welle ist eine Verschnaufpause.', normal: '' }[nextType];
-  document.getElementById('spSummaryTitle').textContent = `Welle ${wave} geschafft! 🎉${perfectWave ? ' ✨ Perfekt!' : ''}`;
-  document.getElementById('spSummarySubtitle').textContent = nextLabel || 'Gold-Abrechnung:';
-  document.getElementById('spSumIncome').textContent = `+${income} Gold${perfectWave ? ' (inkl. Perfekt-Bonus)' : ''}`;
-  document.getElementById('spSumInterest').textContent = `+${interest} Gold`;
-  document.getElementById('spSumTotal').textContent = `${Math.floor(gold)} Gold`;
-  document.getElementById('spUpgradeOverlay').style.display = 'flex';
+  waveSummaryText = `Welle ${wave} geschafft! 🎉${perfectWave ? ' ✨' : ''} +${income} Gold, +${interest} Zinsen.${nextLabel ? ' ' + nextLabel : ''}`;
+  document.getElementById('spWaveSub').textContent = waveSummaryText;
 }
 
 // pulseWaveBig(): aktualisiert die große Wellenzahl unter dem Spielfeld und spielt einen kurzen
@@ -2750,13 +2695,11 @@ function pulseWaveBig() {
 }
 
 // advanceToNextWave(): startet die nächste Welle — automatisch, sobald der Countdown in update()
-// abläuft, oder sofort per Klick auf "Jetzt starten" (Banner-Button oder spWaveBtn während des
-// Countdowns). Ersetzt das alte continueToNextWave() (das nur den Button wieder freigab und auf den
-// nächsten manuellen Klick wartete) — siehe docs/balancing.md, Abschnitt "Automatischer Wellenstart".
+// abläuft. Seit dem Popup-Entfernungs-Nachtrag gibt es dafür keinen manuellen "Jetzt starten"-Klick
+// mehr — siehe docs/balancing.md, Abschnitt "Automatischer Wellenstart" / "Popup-Entfernung".
 function advanceToNextWave() {
   if (gameOver) return;
   autoNextPending = false;
-  document.getElementById('spUpgradeOverlay').style.display = 'none';
   wave++;
   pulseWaveBig();
   updateStats();
@@ -2766,7 +2709,7 @@ function advanceToNextWave() {
 function endGame() {
   gameOver = true;
   autoNextPending = false;
-  document.getElementById('spUpgradeOverlay').style.display = 'none';
+  document.getElementById('spWaveSub').textContent = '';
   document.getElementById('spOverlay').style.display = 'flex';
   document.getElementById('spOverlayTitle').textContent = '💀 Game Over';
   document.getElementById('spOverlayText').textContent = `Du hast Welle ${wave} erreicht.`;
@@ -2776,24 +2719,21 @@ function restartGame() {
   gold = 220; lives = 20; maxLives = 20; wave = 1;
   towers = []; enemies = []; projectiles = [];
   selectedTowerType = null; waveActive = false; gameOver = false; paused = false;
-  autoNextPending = false; autoNextTimer = 0;
+  autoNextPending = false; autoNextTimer = 0; waveSummaryText = '';
   spawnQueue = []; spawnTimer = 0;
   selectedTower = null;
   techPoints = 0; techPointsBought = 0; tech = { defense: 0, economy: 0, attack: 0 };
   shieldCharges = 0; shieldAccum = 0; lifeRegenAccum = 0; lifeGenAccum = 0; livesAtWaveStart = 20;
   document.getElementById('spOverlay').style.display = 'none';
-  document.getElementById('spUpgradeOverlay').style.display = 'none';
+  document.getElementById('spWaveSub').textContent = '';
   document.getElementById('spTowerInfo').style.display = 'none';
-  const waveBtn = document.getElementById('spWaveBtn');
-  waveBtn.disabled = false;
-  waveBtn.textContent = 'Welle starten ▶';
   const pauseBtn = document.getElementById('spPauseBtn');
-  pauseBtn.textContent = '⏸';
+  pauseBtn.textContent = '⏸ Pause';
   pauseBtn.title = 'Spiel pausieren';
   pulseWaveBig();
   updateStats();
-  setMessage('Neues Spiel gestartet.');
   requestAnimationFrame(loop);
+  startWave(); // Popup-Entfernung: auch nach Neustart beginnt Welle 1 sofort automatisch, kein Klick nötig.
 }
 
 // ── Tech-Tree: Aufbau, Anzeige-Refresh, Freischalten, Punkte kaufen (Port aus dem Multiplayer,
@@ -2868,6 +2808,7 @@ window.startSingleplayerMode = function() {
   if (spStarted) return;
   spStarted = true;
   requestAnimationFrame(loop);
+  startWave(); // Popup-Entfernung: Welle 1 beginnt sofort automatisch, kein "Welle starten"-Klick mehr nötig.
 };
 window.setSelectedTowerPriority = setSelectedTowerPriority;
 window.upgradeSelectedTower = upgradeSelectedTower;

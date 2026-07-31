@@ -5,7 +5,6 @@
 //
 // Hinweis: SP_TOWER_TYPES ist ABSICHTLICH ein eigenes Objekt, nicht identisch
 // mit TOWER_TYPES aus balance-multiplayer.js:
-//  - keine "Mine" (keine Wirtschafts-Struktur im Endlos-Modus)
 //  - kein groundOnly bei der Kanone (im Endlos-Modus gibt es keine fliegenden
 //    Gegner, der Flag wäre wirkungslos)
 //  - projSpeed steht in anderen Einheiten als im Multiplayer-Objekt (dort
@@ -15,6 +14,13 @@ const SP_TOWER_TYPES = {
   arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 6 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 4, splash: 45 },
   frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 7, slow: 0.5, slowDuration: 1500 },
+  // Mine: seit dem Endlos-Modus-Feature-Port auch hier verfügbar, aber (anders als im Multiplayer,
+  // wo sie von Anfang an baubar ist) hinter Wirtschaft-Tech-Tier-1 verriegelt (`requiresTech`) -
+  // siehe SP_TECH_LABELS unten und docs/balancing.md für die Begründung. Kosten/Ertrag/Tier-
+  // Skalierung/Deckel/Anzahl-Limit identisch zum Multiplayer (mineIncome()/MINE_MAX_COUNT in
+  // balance-shared.js, gilt jetzt für beide Modi) - eine Mine im Endlos-Modus ist also exakt so
+  // stark wie im Multiplayer, keine separate Balance-Kurve nötig.
+  mine:   { name: 'Mine', cost: 100, color: '#ffd166', requiresTech: { branch: 'economy', tier: 1 } },
   // Titan-Turm: Endlos-Modus-Entsprechung des Multiplayer-Titans (Elite-Einheit, dort erst mit
   // Angriffs-Tech Tier 4 freigeschaltet). Da der Endlos-Modus keine sendbaren Einheiten kennt, wird
   // aus "Elite-Einheit freigeschaltet" hier "Elite-TURM freigeschaltet" - bleibt hinter derselben
@@ -64,13 +70,17 @@ function spawnIntervalMs(w) {
 // ── Tech-Tree (Endlos-Modus-Port des Multiplayer-Tech-Trees) ───────────────
 // Gleiche Struktur wie im Multiplayer (3 Zweige, je 4 Stufen, linear, 1 Punkt/Stufe), aber jede
 // PvP-spezifische Stufe wurde für den Endlos-Modus sinnvoll neu interpretiert, da es hier keinen
-// Gegner-Spieler, kein Einheiten-Senden und keine Minen gibt. Details + Begründung pro Stufe in
-// docs/balancing.md, Abschnitt "Tech-Tree (Endlos-Modus)".
+// Gegner-Spieler und kein Einheiten-Senden gibt. Minen gibt es inzwischen auch im Endlos-Modus
+// (siehe SP_TOWER_TYPES.mine oben) - Wirtschaft Tier 1 schaltet sie frei, statt (wie ursprünglich
+// vor dem Minen-Nachtrag) nur einen pauschalen Welleneinkommens-Bonus zu geben - spiegelt damit den
+// Multiplayer strukturell näher (dort ist Tier 1 ja auch "der Minen-Punkt", nur als Ertrags-Boost
+// statt Freischaltung, weil Minen dort von Anfang an baubar sind). Details + Begründung pro Stufe
+// in docs/balancing.md, Abschnitt "Tech-Tree (Endlos-Modus)".
 const SP_TECH_MAX_TIER = 4;
 const SP_TECH_BRANCHES = ['defense', 'economy', 'attack'];
 const SP_TECH_LABELS = {
   defense: { name: '🛡️ Verteidigung', tiers: ['Basis-Regeneration (+1 Leben alle 60s)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
-  economy: { name: '💰 Wirtschaft', tiers: ['Welleneinkommen +20%', 'Kill-Gold +10%', 'Zinsen (zusätzlich +1%/s vom aktuellen Gold, laufend)', 'Perfekte Welle (+50% Welleneinkommen, falls kein Leben verloren)'] },
+  economy: { name: '💰 Wirtschaft', tiers: ['Minen freigeschaltet (+20% Minen-Ertrag)', 'Kill-Gold +10%', 'Zinsen (zusätzlich +1%/s vom aktuellen Gold, laufend)', 'Perfekte Welle (+50% Welleneinkommen, falls kein Leben verloren)'] },
   attack:  { name: '⚔️ Angriff', tiers: ['Wachtrupp (+1 Leben alle 90s, automatisch)', 'Turm-Feuerrate +10%', 'Turm-Schaden +15%', 'Titan-Turm freigeschaltet (Elite-Turm)'] },
 };
 function spTechPointCost(tier) { return 1; } // wie im Multiplayer: jede Stufe pauschal 1 Punkt
@@ -93,10 +103,20 @@ const SP_SHIELD_CHARGES = 3;                  // Verteidigung T2
 const SP_SHIELD_COOLDOWN_MS = 90000;          // Verteidigung T2
 const SP_RANGE_BOOST_TIER3 = 0.10;            // Verteidigung T3
 const SP_BOLLWERK_BONUS_LIVES = 5;            // Verteidigung T4
-const SP_WAVE_INCOME_BOOST_TIER1 = 0.20;      // Wirtschaft T1
+const SP_MINE_INCOME_BOOST_TIER1 = 0.20;      // Wirtschaft T1 (identisch zur Multiplayer-Formel, mineIncomeMultFor())
 const SP_KILL_GOLD_BOOST_TIER2 = 0.10;        // Wirtschaft T2
 const SP_INTEREST_RATE_PER_SEC_TIER3 = 0.01;  // Wirtschaft T3 (zusätzlich zur normalen Wellenend-Verzinsung)
 const SP_PERFECT_WAVE_BONUS_TIER4 = 0.50;     // Wirtschaft T4
 const SP_LIFE_GEN_INTERVAL_MS = 90000;        // Angriff T1
 const SP_FIRERATE_BOOST_TIER2 = 0.10;         // Angriff T2
 const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
+
+// ── Automatischer Wellenstart (Nachtrag) ────────────────────────────────────
+// Nach der Wellenzusammenfassung startet die nächste Welle jetzt von selbst statt auf einen
+// Button-Klick zu warten (Pause-Button in index.html als Gegenstück, um sich trotzdem Zeit zu
+// nehmen). 6s statt der ursprünglich vorgeschlagenen 5s: reicht, um die Gold-Abrechnung zu lesen
+// und noch 1-2 Klicks zu setzen (z.B. "Alle upgraden" oder eine Mine bauen), ohne die Partie ins
+// Stocken zu bringen. Vor Boss-Wellen bewusst länger (9s) - die Vorwarnung ("Nächste Welle ist eine
+// BOSS-Welle!") soll auch tatsächlich nutzbar sein, um gezielt nachzurüsten, nicht nur gelesen werden.
+const SP_AUTO_NEXT_WAVE_DELAY_MS = 6000;
+const SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS = 9000;
