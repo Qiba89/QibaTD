@@ -25,6 +25,21 @@
     padding: 16px; min-height: 100vh;
   }
   h1 { font-size: 20px; margin: 0 0 12px 0; color: var(--accent); }
+
+  #modeSelect { text-align: center; margin-top: 40px; }
+  #modeSelectButtons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; margin-top: 20px; }
+  .mode-btn {
+    width: 220px; padding: 24px 16px; background: var(--panel); border: 2px solid #2c333c;
+    border-radius: 14px; color: var(--text); cursor: pointer; text-align: center;
+  }
+  .mode-btn:hover { border-color: var(--accent2); background: #232c36; }
+  .mode-btn .mode-icon { font-size: 40px; margin-bottom: 10px; }
+  .mode-btn .mode-name { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+  .mode-btn .mode-desc { font-size: 12px; color: #aab3bd; }
+  .back-btn {
+    background: none; border: none; color: #aab3bd; font-size: 12px; cursor: pointer;
+    margin-bottom: 10px; text-decoration: underline; padding: 0;
+  }
   h3 { margin: 0 0 8px 0; font-size: 14px; color: var(--accent2); }
 
   #lobby {
@@ -69,6 +84,26 @@
   #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
   #connStatus.online { color: #7cd992; }
 
+  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin-bottom: 10px; }
+  #myShieldIndicator { color: #4fd1c5; font-weight: 700; }
+
+  .tech-branch { margin-bottom: 14px; }
+  .tech-branch-title { font-size: 12px; font-weight: 700; color: var(--accent2); margin-bottom: 6px; }
+  .tech-node {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 4px;
+    border-radius: 6px; background: #232b34; border: 1px solid #2c333c; font-size: 11px;
+  }
+  .tech-node.unlocked { border-color: #7cd992; background: #1d2b22; }
+  .tech-node.available { border-color: var(--accent); cursor: pointer; }
+  .tech-node.locked { opacity: 0.45; }
+  .tech-node .tech-tier-badge {
+    flex: 0 0 20px; height: 20px; border-radius: 50%; background: #10151b;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+  }
+  .tech-node.unlocked .tech-tier-badge { background: #7cd992; color: #04201d; }
+  .tech-node .tech-desc { flex: 1; }
+  .tech-node .tech-cost { font-size: 10px; color: var(--accent); white-space: nowrap; }
+
   .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
   .flash-overlay {
@@ -109,6 +144,7 @@
   button.send-btn .name { font-weight: 600; }
   button.send-btn .sub { font-size: 11px; color: #aab3bd; }
   .unit-block { margin-bottom: 8px; }
+  .unit-block.tech-locked-unit { display: none; }
   .unit-block .send-btn { margin-bottom: 4px; }
   .unit-upg-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 0 2px; }
   .unit-upg-row .tier-label { font-size: 11px; color: #aab3bd; }
@@ -162,11 +198,223 @@
   #countdownOverlay .num { font-size: 120px; font-weight: 800; color: var(--accent); }
 
   #overlay .rematch-status { font-size: 12px; color: #aab3bd; margin-top: 10px; min-height: 18px; }
+
+  /* ── Endlos-Singleplayer-Modus (eigener Namensraum) ── */
+  #singleplayerMode .sp-layout {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #singleplayerMode #spGameCanvas {
+    background: var(--grass);
+    border-radius: 10px;
+    border: 2px solid #2c333c;
+    cursor: pointer;
+  }
+  #singleplayerMode .sp-panel {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 14px;
+    width: 220px;
+    border: 1px solid #2c333c;
+  }
+  #singleplayerMode .sp-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background: #10151b;
+    border-radius: 8px;
+  }
+  #singleplayerMode .sp-stats span b { color: var(--accent); }
+  #singleplayerMode .sp-tower-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    background: #232b34;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    font-size: 13px;
+  }
+  #singleplayerMode .sp-tower-btn:hover { border-color: var(--accent); }
+  #singleplayerMode .sp-tower-btn.sp-selected { border-color: var(--accent2); background: #2a3542; }
+  #singleplayerMode .sp-tower-btn .sp-swatch {
+    width: 22px; height: 22px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  #singleplayerMode .sp-tower-btn .sp-info { flex: 1; }
+  #singleplayerMode .sp-tower-btn .sp-name { font-weight: 600; }
+  #singleplayerMode .sp-tower-btn .sp-cost { color: var(--accent); font-size: 12px; }
+  #singleplayerMode button.sp-action {
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #1a1200;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 6px;
+    font-size: 14px;
+  }
+  #singleplayerMode button.sp-action:disabled { opacity: 0.5; cursor: not-allowed; }
+  #singleplayerMode #spMessage {
+    margin-top: 10px;
+    font-size: 13px;
+    min-height: 40px;
+    color: #aab3bd;
+  }
+  #singleplayerMode #spOverlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 10;
+  }
+  #singleplayerMode #spOverlay h2 { font-size: 32px; margin-bottom: 8px; }
+  #singleplayerMode #spOverlay p { color: #aab3bd; margin-bottom: 20px; }
+  #singleplayerMode #spUpgradeOverlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 10;
+  }
+  #singleplayerMode #spUpgradeOverlay h2 { font-size: 26px; margin-bottom: 4px; color: var(--accent); }
+  #singleplayerMode #spUpgradeOverlay p { color: #aab3bd; margin-bottom: 18px; }
+  #singleplayerMode .sp-upgrade-choices {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 640px;
+  }
+  #singleplayerMode .sp-upgrade-card {
+    width: 170px;
+    background: var(--panel);
+    border: 2px solid #2c333c;
+    border-radius: 10px;
+    padding: 16px 12px;
+    text-align: center;
+    cursor: pointer;
+  }
+  #singleplayerMode .sp-upgrade-card:hover { border-color: var(--accent2); background: #232c36; }
+  #singleplayerMode .sp-upgrade-card .icon { font-size: 30px; margin-bottom: 8px; }
+  #singleplayerMode .sp-upgrade-card .title { font-weight: 700; margin-bottom: 4px; }
+  #singleplayerMode .sp-upgrade-card .desc { font-size: 12px; color: #aab3bd; }
+  #singleplayerMode .sp-upgrade-level {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--accent2);
+  }
+  #singleplayerMode .sp-summary-row {
+    display: flex;
+    justify-content: space-between;
+    width: 280px;
+    font-size: 14px;
+    padding: 6px 4px;
+    border-bottom: 1px solid #2c333c;
+  }
+  #singleplayerMode .sp-summary-row b { color: var(--accent); }
+  #singleplayerMode .sp-summary-row.sp-total { border-bottom: none; font-weight: 700; margin-top: 4px; }
+  #singleplayerMode #spTowerInfo {
+    background: #10151b;
+    border: 1px solid #2c333c;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    display: none;
+  }
+  #singleplayerMode #spTowerInfo .sp-ti-title { font-weight: 700; margin-bottom: 4px; color: var(--accent2); }
+  #singleplayerMode #spTowerInfo .sp-ti-row { display: flex; justify-content: space-between; margin-bottom: 6px; color: #aab3bd; }
+  #singleplayerMode #spTowerInfo .sp-ti-btns { display: flex; gap: 6px; }
+  #singleplayerMode #spTowerInfo button {
+    flex: 1;
+    padding: 6px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+  #singleplayerMode #spTowerInfo .sp-ti-upgrade { background: var(--accent2); color: #04201d; }
+  #singleplayerMode #spTowerInfo .sp-ti-upgrade:disabled { opacity: 0.4; cursor: not-allowed; }
+  #singleplayerMode #spTowerInfo .sp-ti-sell { background: var(--danger); color: #2a0000; }
+  #singleplayerMode #spTowerInfo .sp-ti-close { background: #2a323c; color: var(--text); flex: 0 0 30px; }
+  #singleplayerMode .sp-ti-priority {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #singleplayerMode .sp-prio-btn {
+    flex: 1;
+    padding: 6px 4px;
+    border: 2px solid #2c333c;
+    border-radius: 6px;
+    background: #1b2129;
+    color: #aab3bd;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  #singleplayerMode .sp-prio-btn:hover { border-color: var(--accent2); }
+  #singleplayerMode .sp-prio-btn.sp-active { border-color: var(--accent2); background: #2a3542; color: var(--text); }
+
+
+  /* ── Mobile-Optimierung ── */
+  @media (max-width: 640px) {
+    body { padding: 8px; }
+    h1 { font-size: 16px; }
+    .stat-bars { flex-direction: column; gap: 6px; }
+    .stat-card { font-size: 12px; padding: 6px 10px; }
+    .controls { flex-direction: column; align-items: stretch; }
+    .panel { width: 100%; max-width: none; }
+    canvas { width: 100%; height: auto; touch-action: manipulation; }
+    #modeSelectButtons { flex-direction: column; align-items: center; }
+    .mode-btn { width: 100%; max-width: 280px; }
+    #openRoomsList { max-height: 160px; }
+    button, .pick-btn, .send-btn, .prio-btn { min-height: 40px; } /* größere Tap-Fläche */
+    #singleplayerMode .sp-layout { flex-direction: column; align-items: stretch; }
+    #singleplayerMode .sp-panel { width: 100%; }
+    #singleplayerMode #spGameCanvas { width: 100%; height: auto; }
+  }
 </style>
 </head>
 <body>
 
+<div id="modeSelect">
+  <h1>⚔️ TOWER DEFENSE</h1>
+  <div id="modeSelectButtons">
+    <button class="mode-btn" onclick="selectMode('multiplayer')">
+      <div class="mode-icon">🎮</div>
+      <div class="mode-name">Multiplayer</div>
+      <div class="mode-desc">Gegen einen Freund, live über Raum-Code</div>
+    </button>
+    <button class="mode-btn" onclick="selectMode('singleplayer')">
+      <div class="mode-icon">♾️</div>
+      <div class="mode-name">Endlos-Modus</div>
+      <div class="mode-desc">Allein gegen unendlich viele Wellen</div>
+    </button>
+  </div>
+</div>
+
+<div id="multiplayerMode" style="display:none;">
 <h1>⚔️ TOWER DEFENSE — MULTIPLAYER</h1>
+<button class="back-btn" onclick="confirmExit()">🚪 Beenden</button>
 
 <div id="lobby">
   <h3>Raum beitreten</h3>
@@ -194,13 +442,14 @@
   <div class="stat-bars">
     <div class="stat-card mine">
       <span class="label" id="meLabel">DU</span>
-      ❤️ <b id="myLives">20</b> &nbsp; 💰 <b id="myGold">100</b> &nbsp; (+<span id="myIncome">1.0</span>/s)
+      ❤️ <b id="myLives">20</b> &nbsp; 💰 <b id="myGold">100</b> &nbsp; (+<span id="myIncome">1.0</span>/s) &nbsp; 🔧 <b id="myTechPoints">0</b> &nbsp; 🛡️<span id="myShieldIndicator"></span>
     </div>
     <div class="stat-card theirs">
       <span class="label" id="oppLabel">GEGNER</span>
-      ❤️ <b id="oppLives">20</b> &nbsp; 💰 <b id="oppGold">100</b> &nbsp; (+<span id="oppIncome">1.0</span>/s)
+      ❤️ <b id="oppLives">20</b> &nbsp; 💰 <b id="oppGold">100</b> &nbsp; (+<span id="oppIncome">1.0</span>/s) &nbsp; 🔧 <b id="oppTechPoints">0</b>
     </div>
   </div>
+  <div id="bossTimerBar">👹 Nächster Boss in <b id="bossTimerVal">90</b>s (Runde <span id="bossRoundVal">0</span>)</div>
 
   <div class="lanes" style="display:none;">
     <div class="lane-block">
@@ -239,6 +488,10 @@
       <h3>Einheiten schicken</h3>
       <div id="sendButtons"></div>
     </div>
+    <div class="panel">
+      <h3>🔧 Tech-Tree (<span id="techPointsLabel">0</span> Punkte)</h3>
+      <div id="techTree"></div>
+    </div>
   </div>
 
   <div id="message">Baue auf deiner Seite, schicke Einheiten zum Gegner.</div>
@@ -252,6 +505,67 @@
   <button onclick="requestRematch()">Neue Runde</button>
   <div class="rematch-status" id="rematchStatus"></div>
 </div>
+</div><!-- /multiplayerMode -->
+
+<div id="singleplayerMode" style="display:none;">
+<h1>♾️ TOWER DEFENSE — ENDLOS-MODUS</h1>
+<button class="back-btn" onclick="confirmExit()">🚪 Beenden</button>
+
+
+<h1>⚔️ TOWER DEFENSE</h1>
+
+<div class="sp-layout">
+  <canvas id="spGameCanvas" width="720" height="480"></canvas>
+
+  <div class="sp-panel">
+    <div class="sp-stats">
+      <span>❤️ <b id="spLivesVal">20</b></span>
+      <span>💰 <b id="spGoldVal">220</b></span>
+      <span>🌊 <b id="spWaveVal">1</b></span>
+    </div>
+
+    <div id="spTowerButtons"></div>
+
+    <div id="spTowerInfo">
+      <div class="sp-ti-title" id="spTiTitle"></div>
+      <div class="sp-ti-row"><span>Tier</span><span id="spTiLevel"></span></div>
+      <div class="sp-ti-row"><span>Schaden</span><span id="spTiDamage"></span></div>
+      <div class="sp-ti-row"><span>Feuerrate</span><span id="spTiFireRate"></span></div>
+      <div class="sp-ti-row"><span>Reichweite</span><span id="spTiRange"></span></div>
+      <div class="sp-ti-priority">
+        <button class="sp-prio-btn" id="spPrioFirstBtn" onclick="setSelectedTowerPriority('first')">Erstes Ziel</button>
+        <button class="sp-prio-btn" id="spPrioHpBtn" onclick="setSelectedTowerPriority('hp')">Meiste HP</button>
+      </div>
+      <div class="sp-ti-btns">
+        <button class="sp-ti-upgrade" id="spTiUpgradeBtn" onclick="upgradeSelectedTower()"></button>
+        <button class="sp-ti-sell" onclick="sellSelectedTower()">Verkaufen</button>
+        <button class="sp-ti-close" onclick="deselectTower()">✕</button>
+      </div>
+    </div>
+
+    <button class="sp-action" id="spWaveBtn">Welle starten ▶</button>
+    <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen.</div>
+  </div>
+</div>
+
+<div id="spOverlay">
+  <h2 id="spOverlayTitle"></h2>
+  <p id="spOverlayText"></p>
+  <button class="sp-action" style="width:200px" onclick="restartGame()">Neustart</button>
+</div>
+
+<div id="spUpgradeOverlay">
+  <h2 id="spSummaryTitle">Welle geschafft! 🎉</h2>
+  <p id="spSummarySubtitle">Gold-Abrechnung:</p>
+  <div class="sp-summary-row"><span>Passives Einkommen</span><b id="spSumIncome"></b></div>
+  <div class="sp-summary-row"><span>Zinsen</span><b id="spSumInterest"></b></div>
+  <div class="sp-summary-row sp-total"><span>Neuer Kontostand</span><b id="spSumTotal"></b></div>
+  <button class="sp-action" style="width:200px;margin-top:16px" onclick="continueToNextWave()">Nächste Welle ▶</button>
+</div>
+
+
+</div><!-- /singleplayerMode -->
+
 
 <script>
 // ── Geometrie & Definitionen (identisch zum Einzelspieler-PvP) ──────────
@@ -273,6 +587,7 @@ const UNIT_TYPES = {
   guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 10 },
   brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 14 },
   icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 11, flying: true, incomeBoostRate: 0.05 },
+  titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
 };
 
 const TOWER_MAX_TIER = 4;
@@ -285,13 +600,32 @@ const RADIUS_GROWTH_PER_TIER = 1.08, RADIUS_CAP_MULT = 1.35;
 // Einheiten-Upgrades: pro Stufe doppelt so stark (HP), aber 5x so teuer wie die vorige Stufe.
 // Gedeckelt bei Tier 3 (macht x8 HP für x125 der Basis-Kosten - alles darüber wird absurd teuer).
 const UNIT_MAX_TIER = 3;
-const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135 };
+const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300 };
 const UNIT_HP_GROWTH_PER_TIER = 2;
 const UNIT_COST_GROWTH_PER_TIER = 5;
 
-// Sende-Limit: max. 20 Einheiten pro rollierendem 10-Sekunden-Fenster
+// Sende-Limit: max. 20 Einheiten pro rollierendem 10-Sekunden-Fenster (25 mit Angriffs-Tech T3)
 const SEND_LIMIT_COUNT = 20;
+const SEND_LIMIT_COUNT_UPGRADED = 25;
 const SEND_LIMIT_WINDOW_MS = 10000;
+
+// ── Bosse: bedrohen in festen Abständen BEIDE Seiten gleichzeitig ───────
+const BOSS_INTERVAL_MS = 90000; // alle 90s
+const BOSS_BASE_HP = 300;
+const BOSS_HP_GROWTH = 1.3; // pro Boss-Runde
+const BOSS_SPEED = 40;
+const BOSS_RADIUS = 20;
+const BOSS_LEAK_LIVES = 3; // Lebenskosten, falls der Boss durchkommt
+
+// ── Tech-Tree: 3 Zweige, je 4 Stufen, linear (Tier N braucht Tier N-1) ──
+const TECH_MAX_TIER = 4;
+const TECH_BRANCHES = ['defense', 'economy', 'attack'];
+const TECH_LABELS = {
+  defense: { name: '🛡️ Verteidigung', tiers: ['Leben-Regeneration (+1 alle 60s)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
+  economy: { name: '💰 Wirtschaft', tiers: ['Minen-Ertrag +20%', 'Sende-Einkommensschub +5%', 'Grundeinkommen +1 Gold/s', 'Grundeinkommen nochmal +2 Gold/s'] },
+  attack:  { name: '⚔️ Angriff', tiers: ['Lebensklau (+1 eigenes Leben je durchgekommener Einheit)', 'Einheiten-Tempo +10%', 'Sende-Limit 20→25 pro 10s', 'Titan freigeschaltet (Elite-Einheit)'] },
+};
+function techPointCost(tier) { return tier; } // Tier 1 kostet 1 Punkt, Tier 2 kostet 2, usw.
 
 function tierUpgradeCost(nextTier) { return Math.round(TIER_COST_BASE * Math.pow(TIER_COST_GROWTH, nextTier)); }
 function effectiveDamage(t) { const g = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE; return t.baseDamage * Math.pow(g, t.tier); }
@@ -329,15 +663,21 @@ let prevState = null, prevStateTime = 0, stateTime = 0; // nur Gast: für flüss
 // const WS_SERVER_URL = 'wss://td-multiplayer-xxxx.onrender.com';
 const WS_SERVER_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
 
-const ws = new WebSocket(WS_SERVER_URL);
+let ws = null;
 let roomsPollTimer = null;
-ws.addEventListener('open', () => {
-  setLobbyMsg('Verbunden mit Server. Raum-Code eingeben und loslegen.');
-  refreshRoomsList();
-  roomsPollTimer = setInterval(refreshRoomsList, 2000);
-});
-ws.addEventListener('close', () => setLobbyMsg('Verbindung zum Server verloren. Seite neu laden.'));
-ws.addEventListener('message', (evt) => {
+
+// Verbindung wird erst aufgebaut, sobald der Multiplayer-Modus tatsächlich gewählt wird
+// (nicht schon beim reinen Seitenaufruf, falls jemand nur den Singleplayer spielen will).
+function connectMultiplayer() {
+  if (ws) return; // schon verbunden
+  ws = new WebSocket(WS_SERVER_URL);
+  ws.addEventListener('open', () => {
+    setLobbyMsg('Verbunden mit Server. Raum-Code eingeben und loslegen.');
+    refreshRoomsList();
+    roomsPollTimer = setInterval(refreshRoomsList, 2000);
+  });
+  ws.addEventListener('close', () => setLobbyMsg('Verbindung zum Server verloren. Seite neu laden.'));
+  ws.addEventListener('message', (evt) => {
   let data;
   try { data = JSON.parse(evt.data); } catch (e) { return; }
 
@@ -374,28 +714,56 @@ ws.addEventListener('message', (evt) => {
   } else if (data.type === 'action' && isHost) {
     applyHostAction(data.payload);
   }
-});
+  });
+}
 
 function freshState() {
   return {
     phase: 'ready', // 'ready' -> 'countdown' -> 'playing' -> 'ended'
     p1Ready: false, p2Ready: false, countdownValue: null,
     p1Gold: 100, p1Lives: 20, p2Gold: 100, p2Lives: 20,
+    p1MaxLives: 20, p2MaxLives: 20,
     p1BonusIncome: 0, p2BonusIncome: 0, // wächst, wenn man Einheiten schickt
-    p1UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0 },
-    p2UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0 },
+    p1UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0 },
+    p2UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0 },
     p1SendTimes: [], p2SendTimes: [], // Zeitstempel für das Sende-Limit
     p1Structures: [], p2Structures: [],
     unitsOnLaneP1: [], unitsOnLaneP2: [],
     projP1: [], projP2: [],
+    // Tech-Tree
+    p1TechPoints: 0, p2TechPoints: 0,
+    p1Tech: { defense: 0, economy: 0, attack: 0 },
+    p2Tech: { defense: 0, economy: 0, attack: 0 },
+    p1RegenAccum: 0, p2RegenAccum: 0,
+    p1ShieldCharges: 0, p2ShieldCharges: 0,
+    p1ShieldAccum: 0, p2ShieldAccum: 0,
+    // Boss-Intervalle (bedrohen beide Seiten gleichzeitig, unabhängig von den Spielern)
+    bossTimer: BOSS_INTERVAL_MS, bossRound: 0,
     gameOver: false, winner: null,
   };
 }
 function sendIncomeBoost(unitCost, rate) { return Math.max(1, Math.ceil(unitCost * (rate !== undefined ? rate : DEFAULT_INCOME_BOOST_RATE))); }
-function canSend(sendTimes) {
+function canSend(sendTimes, limit) {
   const now = Date.now();
   while (sendTimes.length && now - sendTimes[0] > SEND_LIMIT_WINDOW_MS) sendTimes.shift();
-  return sendTimes.length < SEND_LIMIT_COUNT;
+  return sendTimes.length < (limit || SEND_LIMIT_COUNT);
+}
+
+function selectMode(mode) {
+  document.getElementById('modeSelect').style.display = 'none';
+  if (mode === 'multiplayer') {
+    document.getElementById('multiplayerMode').style.display = 'block';
+    connectMultiplayer();
+  } else if (mode === 'singleplayer') {
+    document.getElementById('singleplayerMode').style.display = 'block';
+    window.startSingleplayerMode();
+  }
+}
+
+function confirmExit() {
+  if (confirm('Wirklich beenden? Der aktuelle Spielstand geht verloren.')) {
+    location.reload();
+  }
 }
 
 function hostRoom() {
@@ -475,7 +843,24 @@ function buildPalette() {
       </div>`;
     block.querySelector('.send-btn').onclick = () => sendUnit(key);
     block.querySelector('.unit-upg-btn').onclick = () => upgradeUnit(key);
+    if (u.requiresTech) block.classList.add('tech-locked-unit');
     sendDiv.appendChild(block);
+  });
+
+  const techDiv = document.getElementById('techTree');
+  TECH_BRANCHES.forEach(branch => {
+    const wrap = document.createElement('div');
+    wrap.className = 'tech-branch';
+    let html = `<div class="tech-branch-title">${TECH_LABELS[branch].name}</div>`;
+    for (let tier = 1; tier <= TECH_MAX_TIER; tier++) {
+      html += `<div class="tech-node" id="tech-${branch}-${tier}" onclick="unlockTech('${branch}')">
+        <div class="tech-tier-badge">${tier}</div>
+        <div class="tech-desc">${TECH_LABELS[branch].tiers[tier - 1]}</div>
+        <div class="tech-cost">${techPointCost(tier)}P</div>
+      </div>`;
+    }
+    wrap.innerHTML = html;
+    techDiv.appendChild(wrap);
   });
 }
 
@@ -571,6 +956,18 @@ function upgradeUnit(key) {
   if (myGold < cost) { setMessage('Nicht genug Gold für Einheiten-Upgrade.'); return; }
   if (isHost) { hostUpgradeUnit(key); }
   else { queueAction({ type: 'upgradeUnit', unitType: key }); }
+}
+
+function unlockTech(branch) {
+  if (!state || state.phase !== 'playing') return;
+  const tech = isHost ? state.p1Tech : state.p2Tech;
+  const points = isHost ? state.p1TechPoints : state.p2TechPoints;
+  const nextTier = tech[branch] + 1;
+  if (nextTier > TECH_MAX_TIER) return;
+  const cost = techPointCost(nextTier);
+  if (points < cost) { setMessage('Nicht genug Tech-Punkte. Bosse besiegen, um welche zu bekommen!'); return; }
+  if (isHost) { hostUnlockTech(branch); }
+  else { queueAction({ type: 'unlockTech', branch }); }
 }
 
 let myReadyLocal = false;
@@ -688,40 +1085,50 @@ function hostUpgradeUnit(key, forGuest) {
   else { if (state.p1Gold < cost) return; state.p1Gold -= cost; }
   tiers[key]++;
 }
+function hasTech(techObj, branch, tier) { return techObj[branch] >= tier; }
+function sendLimitFor(tech) { return hasTech(tech, 'attack', 3) ? SEND_LIMIT_COUNT_UPGRADED : SEND_LIMIT_COUNT; }
+function incomeRateBonusFor(tech) { return hasTech(tech, 'economy', 2) ? 0.05 : 0; }
+function unitSpeedMultFor(tech) { return hasTech(tech, 'attack', 2) ? 1.1 : 1; }
+function baseIncomeFor(tech) { return 1 + (hasTech(tech, 'economy', 3) ? 1 : 0) + (hasTech(tech, 'economy', 4) ? 2 : 0); }
+function mineIncomeMultFor(tech) { return hasTech(tech, 'economy', 1) ? 1.2 : 1; }
+function rangeMultFor(tech) { return hasTech(tech, 'defense', 3) ? 1.1 : 1; }
+
 function hostSendUnit(key, forGuest) {
   const u = UNIT_TYPES[key];
+  const tech = forGuest ? state.p2Tech : state.p1Tech;
+  if (u.requiresTech && tech[u.requiresTech.branch] < u.requiresTech.tier) return; // noch nicht freigeschaltet
+  const tiers = forGuest ? state.p2UnitTiers : state.p1UnitTiers;
+  const tier = tiers[key];
+  const cost = unitSendCost(key, tier);
+  const gold = forGuest ? state.p2Gold : state.p1Gold;
+  if (gold < cost) return;
+  const sendTimes = forGuest ? state.p2SendTimes : state.p1SendTimes;
+  if (!canSend(sendTimes, sendLimitFor(tech))) return;
+  const rate = (u.incomeBoostRate !== undefined ? u.incomeBoostRate : DEFAULT_INCOME_BOOST_RATE) + incomeRateBonusFor(tech);
+  const hp = unitEffectiveHp(key, tier);
+  const speed = u.speed * unitSpeedMultFor(tech);
+  const unitObj = { id: nextEntityId++, hp, maxHp: hp, speed, radius: u.radius, color: u.color, flying: !!u.flying, x: 0, y: PATH_Y, slowUntil: 0 };
+  sendTimes.push(Date.now());
   if (forGuest) {
-    const tier = state.p2UnitTiers[key];
-    const cost = unitSendCost(key, tier);
-    if (state.p2Gold < cost) return;
-    if (!canSend(state.p2SendTimes)) return;
     state.p2Gold -= cost;
-    state.p1Gold += Math.floor(cost / 3); // p2 schickt Richtung p1
-    state.p2BonusIncome += sendIncomeBoost(cost, u.incomeBoostRate);
-    state.p2SendTimes.push(Date.now());
-    const hp = unitEffectiveHp(key, tier);
-    state.unitsOnLaneP1.push({ id: nextEntityId++, hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, flying: !!u.flying, x: 0, y: PATH_Y, slowUntil: 0 });
+    state.p1Gold += Math.floor(cost / 3);
+    state.p2BonusIncome += sendIncomeBoost(cost, rate);
+    state.unitsOnLaneP1.push(unitObj);
   } else {
-    const tier = state.p1UnitTiers[key];
-    const cost = unitSendCost(key, tier);
-    if (state.p1Gold < cost) return;
-    if (!canSend(state.p1SendTimes)) return;
     state.p1Gold -= cost;
-    state.p2Gold += Math.floor(cost / 3); // p1 schickt Richtung p2
-    state.p1BonusIncome += sendIncomeBoost(cost, u.incomeBoostRate);
-    state.p1SendTimes.push(Date.now());
-    const hp = unitEffectiveHp(key, tier);
-    state.unitsOnLaneP2.push({ id: nextEntityId++, hp, maxHp: hp, speed: u.speed, radius: u.radius, color: u.color, flying: !!u.flying, x: 0, y: PATH_Y, slowUntil: 0 });
+    state.p2Gold += Math.floor(cost / 3);
+    state.p1BonusIncome += sendIncomeBoost(cost, rate);
+    state.unitsOnLaneP2.push(unitObj);
   }
 }
 
 // ── Host: Simulationsschritt (läuft nur beim Host) ──────────────────────
-function fireTowers(structures, units, projectiles) {
+function fireTowers(structures, units, projectiles, rangeMult) {
   structures.forEach(t => {
     if (t.type === 'mine') return;
     t.cooldown -= dtGlobal;
     if (t.cooldown > 0) return;
-    const effRange = effectiveRange(t);
+    const effRange = effectiveRange(t) * (rangeMult || 1);
     let target = null, bestScore = -1;
     units.forEach(u => {
       if (t.groundOnly && u.flying) return; // Boden-Verteidigung kann Fliegende nicht anvisieren
@@ -732,7 +1139,7 @@ function fireTowers(structures, units, projectiles) {
     });
     if (target) {
       t.cooldown = effectiveFireRate(t);
-      projectiles.push({ id: nextEntityId++, x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t), color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration });
+      projectiles.push({ id: nextEntityId++, x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t), color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration, groundOnly: !!t.groundOnly });
     }
   });
 }
@@ -746,11 +1153,15 @@ function moveUnits(units, onReachEnd) {
     if (u.x >= LANE_W) { units.splice(i, 1); onReachEnd(u); }
   }
 }
-function damageUnit(u, dmg, units) {
+function damageUnit(u, dmg, units, onBossKilled) {
   u.hp -= dmg;
-  if (u.hp <= 0) { const idx = units.indexOf(u); if (idx >= 0) units.splice(idx, 1); }
+  if (u.hp <= 0) {
+    const idx = units.indexOf(u);
+    if (idx >= 0) units.splice(idx, 1);
+    if (u.isBoss && onBossKilled) onBossKilled();
+  }
 }
-function moveProjectiles(projectiles, units) {
+function moveProjectiles(projectiles, units, onBossKilled) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     if (!units.includes(p.target)) { projectiles.splice(i, 1); continue; }
@@ -758,10 +1169,40 @@ function moveProjectiles(projectiles, units) {
     const dist = Math.hypot(dx, dy);
     const step = p.speed * dtGlobal / 1000;
     if (dist < step + 5) {
-      if (p.splash) units.slice().forEach(u => { if (Math.hypot(u.x - p.target.x, u.y - p.target.y) <= p.splash) damageUnit(u, p.damage, units); });
-      else { damageUnit(p.target, p.damage, units); if (p.slow && !p.target.flying) p.target.slowUntil = performance.now() + p.slowDuration; }
+      if (p.splash) units.slice().forEach(u => { if (p.groundOnly && u.flying) return; if (Math.hypot(u.x - p.target.x, u.y - p.target.y) <= p.splash) damageUnit(u, p.damage, units, onBossKilled); });
+      else { damageUnit(p.target, p.damage, units, onBossKilled); if (p.slow && !p.target.flying) p.target.slowUntil = performance.now() + p.slowDuration; }
       projectiles.splice(i, 1);
     } else { p.x += (dx / dist) * step; p.y += (dy / dist) * step; }
+  }
+}
+
+function tickBossSpawn(dt) {
+  state.bossTimer -= dt;
+  if (state.bossTimer <= 0) {
+    state.bossRound++;
+    state.bossTimer = BOSS_INTERVAL_MS;
+    const hp = Math.round(BOSS_BASE_HP * Math.pow(BOSS_HP_GROWTH, state.bossRound - 1));
+    const mk = () => ({ id: nextEntityId++, hp, maxHp: hp, speed: BOSS_SPEED, radius: BOSS_RADIUS, color: '#e63946', flying: false, isBoss: true, x: 0, y: PATH_Y, slowUntil: 0 });
+    state.unitsOnLaneP1.push(mk());
+    state.unitsOnLaneP2.push(mk());
+  }
+}
+function tickPlayerTimers(dt) {
+  if (hasTech(state.p1Tech, 'defense', 1)) {
+    state.p1RegenAccum += dt;
+    if (state.p1RegenAccum >= 60000) { state.p1RegenAccum -= 60000; state.p1Lives = Math.min(state.p1MaxLives, state.p1Lives + 1); }
+  }
+  if (hasTech(state.p2Tech, 'defense', 1)) {
+    state.p2RegenAccum += dt;
+    if (state.p2RegenAccum >= 60000) { state.p2RegenAccum -= 60000; state.p2Lives = Math.min(state.p2MaxLives, state.p2Lives + 1); }
+  }
+  if (hasTech(state.p1Tech, 'defense', 2)) {
+    state.p1ShieldAccum += dt;
+    if (state.p1ShieldAccum >= 90000 && state.p1ShieldCharges < 3) { state.p1ShieldAccum -= 90000; state.p1ShieldCharges = 3; }
+  }
+  if (hasTech(state.p2Tech, 'defense', 2)) {
+    state.p2ShieldAccum += dt;
+    if (state.p2ShieldAccum >= 90000 && state.p2ShieldCharges < 3) { state.p2ShieldAccum -= 90000; state.p2ShieldCharges = 3; }
   }
 }
 
@@ -788,26 +1229,52 @@ function hostUpdate(dt) {
   if (state.phase === 'ended') return;
 
   // phase === 'playing'
-  state.p1Gold += (1 + mineIncomeTotal(state.p1Structures) + state.p1BonusIncome) * dt / 1000;
-  state.p2Gold += (1 + mineIncomeTotal(state.p2Structures) + state.p2BonusIncome) * dt / 1000;
-  // Einheiten, die durchkommen, verlieren dem Ziel ein Leben - überleben aber und
+  state.p1Gold += (baseIncomeFor(state.p1Tech) + mineIncomeTotal(state.p1Structures) * mineIncomeMultFor(state.p1Tech) + state.p1BonusIncome) * dt / 1000;
+  state.p2Gold += (baseIncomeFor(state.p2Tech) + mineIncomeTotal(state.p2Structures) * mineIncomeMultFor(state.p2Tech) + state.p2BonusIncome) * dt / 1000;
+
+  tickBossSpawn(dt);
+  tickPlayerTimers(dt);
+
+  // Einheiten, die durchkommen, verlieren dem Ziel ein Leben - überleben aber (außer Bosse) und
   // laufen sofort in die jeweils andere Spur weiter (mit ihren aktuellen HP), bis sie sterben.
   moveUnits(state.unitsOnLaneP1, (u) => {
+    if (state.p1ShieldCharges > 0) {
+      state.p1ShieldCharges--;
+      if (!u.isBoss) { u.x = 0; u.y = PATH_Y; u.slowUntil = 0; state.unitsOnLaneP2.push(u); }
+      return;
+    }
+    if (u.isBoss) {
+      state.p1Lives -= BOSS_LEAK_LIVES;
+      if (state.p1Lives <= 0) hostEndGame('p2');
+      return;
+    }
     state.p1Lives--;
     if (state.p1Lives <= 0) { hostEndGame('p2'); return; }
+    if (hasTech(state.p2Tech, 'attack', 1)) state.p2Lives = Math.min(state.p2MaxLives, state.p2Lives + 1);
     u.x = 0; u.y = PATH_Y; u.slowUntil = 0;
     state.unitsOnLaneP2.push(u);
   });
   moveUnits(state.unitsOnLaneP2, (u) => {
+    if (state.p2ShieldCharges > 0) {
+      state.p2ShieldCharges--;
+      if (!u.isBoss) { u.x = 0; u.y = PATH_Y; u.slowUntil = 0; state.unitsOnLaneP1.push(u); }
+      return;
+    }
+    if (u.isBoss) {
+      state.p2Lives -= BOSS_LEAK_LIVES;
+      if (state.p2Lives <= 0) hostEndGame('p1');
+      return;
+    }
     state.p2Lives--;
     if (state.p2Lives <= 0) { hostEndGame('p1'); return; }
+    if (hasTech(state.p1Tech, 'attack', 1)) state.p1Lives = Math.min(state.p1MaxLives, state.p1Lives + 1);
     u.x = 0; u.y = PATH_Y; u.slowUntil = 0;
     state.unitsOnLaneP1.push(u);
   });
-  fireTowers(state.p1Structures, state.unitsOnLaneP1, state.projP1);
-  fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2);
-  moveProjectiles(state.projP1, state.unitsOnLaneP1);
-  moveProjectiles(state.projP2, state.unitsOnLaneP2);
+  fireTowers(state.p1Structures, state.unitsOnLaneP1, state.projP1, rangeMultFor(state.p1Tech));
+  fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2, rangeMultFor(state.p2Tech));
+  moveProjectiles(state.projP1, state.unitsOnLaneP1, () => { state.p1TechPoints++; });
+  moveProjectiles(state.projP2, state.unitsOnLaneP2, () => { state.p2TechPoints++; });
 }
 function hostEndGame(winner) { state.gameOver = true; state.winner = winner; state.phase = 'ended'; }
 
@@ -833,6 +1300,23 @@ function applyHostAction(a) {
   else if (a.type === 'upgradeUnit') hostUpgradeUnit(a.unitType, true);
   else if (a.type === 'ready') hostSetReady(a.ready, true);
   else if (a.type === 'rematch') hostRematch();
+  else if (a.type === 'unlockTech') hostUnlockTech(a.branch, true);
+}
+
+function hostUnlockTech(branch, forGuest) {
+  const tech = forGuest ? state.p2Tech : state.p1Tech;
+  const points = forGuest ? state.p2TechPoints : state.p1TechPoints;
+  const nextTier = tech[branch] + 1;
+  if (nextTier > TECH_MAX_TIER) return;
+  const cost = techPointCost(nextTier);
+  if (points < cost) return;
+  if (forGuest) state.p2TechPoints -= cost; else state.p1TechPoints -= cost;
+  tech[branch] = nextTier;
+  // Einmalige Sofort-Effekte
+  if (branch === 'defense' && nextTier === 4) {
+    if (forGuest) { state.p2MaxLives += 5; state.p2Lives += 5; }
+    else { state.p1MaxLives += 5; state.p1Lives += 5; }
+  }
 }
 
 // ── Gast: zeichnen + UI-Sync im eigenen Animationstakt (nicht bei jeder Netzwerknachricht) ──
@@ -896,15 +1380,34 @@ function updateUIFromState() {
   const myBonus = isHost ? state.p1BonusIncome : state.p2BonusIncome;
   const oppBonus = isHost ? state.p2BonusIncome : state.p1BonusIncome;
   const myTiers = isHost ? state.p1UnitTiers : state.p2UnitTiers;
+  const myTech = isHost ? state.p1Tech : state.p2Tech;
+  const oppTech = isHost ? state.p2Tech : state.p1Tech;
+  const myTechPoints = isHost ? state.p1TechPoints : state.p2TechPoints;
+  const oppTechPoints = isHost ? state.p2TechPoints : state.p1TechPoints;
+  const myShield = isHost ? state.p1ShieldCharges : state.p2ShieldCharges;
+
   document.getElementById('myGold').textContent = Math.floor(myGold);
   document.getElementById('myLives').textContent = myLives;
   document.getElementById('oppGold').textContent = Math.floor(oppGold);
   document.getElementById('oppLives').textContent = oppLives;
-  document.getElementById('myIncome').textContent = (1 + mineIncomeTotal(myStructs) + myBonus).toFixed(1);
-  document.getElementById('oppIncome').textContent = (1 + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) + oppBonus).toFixed(1);
+  document.getElementById('myIncome').textContent = (baseIncomeFor(myTech) + mineIncomeTotal(myStructs) * mineIncomeMultFor(myTech) + myBonus).toFixed(1);
+  document.getElementById('oppIncome').textContent = (baseIncomeFor(oppTech) + mineIncomeTotal(isHost ? state.p2Structures : state.p1Structures) * mineIncomeMultFor(oppTech) + oppBonus).toFixed(1);
+  document.getElementById('myTechPoints').textContent = myTechPoints;
+  document.getElementById('oppTechPoints').textContent = oppTechPoints;
+  document.getElementById('techPointsLabel').textContent = myTechPoints;
+  document.getElementById('myShieldIndicator').textContent = myShield > 0 ? '●'.repeat(myShield) : '—';
+  document.getElementById('bossTimerVal').textContent = Math.max(0, Math.ceil(state.bossTimer / 1000));
+  document.getElementById('bossRoundVal').textContent = state.bossRound;
+
   BUILD_ORDER.forEach(key => { document.getElementById('build-' + key).style.opacity = myGold < TOWER_TYPES[key].cost ? '0.5' : '1'; });
   Object.keys(UNIT_TYPES).forEach(key => {
     const u = UNIT_TYPES[key];
+    const block = document.getElementById('unit-block-' + key);
+    if (u.requiresTech) {
+      const unlocked = myTech[u.requiresTech.branch] >= u.requiresTech.tier;
+      block.classList.toggle('tech-locked-unit', !unlocked);
+      if (!unlocked) return; // Rest der Anzeige für diese Einheit überspringen, ist eh versteckt
+    }
     const tier = myTiers[key];
     const hp = unitEffectiveHp(key, tier);
     const sendCost = unitSendCost(key, tier);
@@ -923,6 +1426,21 @@ function updateUIFromState() {
       upgBtn.disabled = myGold < cost;
     }
   });
+
+  TECH_BRANCHES.forEach(branch => {
+    const currentTier = myTech[branch];
+    for (let tier = 1; tier <= TECH_MAX_TIER; tier++) {
+      const node = document.getElementById(`tech-${branch}-${tier}`);
+      const cost = techPointCost(tier);
+      const unlocked = currentTier >= tier;
+      const available = !unlocked && currentTier === tier - 1 && myTechPoints >= cost;
+      node.classList.toggle('unlocked', unlocked);
+      node.classList.toggle('available', available);
+      node.classList.toggle('locked', !unlocked && !available);
+      node.querySelector('.tech-tier-badge').textContent = unlocked ? '✓' : tier;
+    }
+  });
+
   if (selectedStructure) {
     const fresh = myStructs.find(s => s.c === selectedStructure.c && s.r === selectedStructure.r);
     selectedStructure = fresh || null;
@@ -1008,6 +1526,536 @@ function showEndOverlay() {
 function hideEndOverlay() {
   document.getElementById('overlay').style.display = 'none';
 }
+</script>
+
+<script>
+(function(){
+
+const canvas = document.getElementById('spGameCanvas');
+const ctx = canvas.getContext('2d');
+const CELL = 40;
+const COLS = canvas.width / CELL;
+const ROWS = canvas.height / CELL;
+
+// Path as grid waypoints (col, row) -> converted to pixel centers
+const pathCells = [
+  [0,3],[1,3],[2,3],[3,3],[3,4],[3,5],[3,6],[4,6],[5,6],[6,6],[7,6],[7,5],[7,4],[7,3],[7,2],
+  [8,2],[9,2],[10,2],[11,2],[11,3],[11,4],[11,5],[11,6],[11,7],[11,8],[12,8],[13,8],[14,8],
+  [15,8],[16,8],[17,8]
+];
+const waypoints = pathCells.map(([c,r]) => ({x: c*CELL + CELL/2, y: r*CELL + CELL/2}));
+const pathSet = new Set(pathCells.map(([c,r]) => `${c},${r}`));
+
+const TOWER_TYPES = {
+  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 6 },
+  cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 4, splash: 45 },
+  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 7, slow: 0.5, slowDuration: 1500 },
+};
+
+let gold = 220;
+let lives = 20;
+let wave = 1;
+let towers = [];
+let enemies = [];
+let projectiles = [];
+let selectedTowerType = null;
+let waveActive = false;
+let gameOver = false;
+let lastTime = 0;
+let spawnQueue = [];
+let spawnTimer = 0;
+let selectedTower = null; // currently selected placed tower (for upgrade/sell panel)
+
+// ── Skalierungs-Spezifikation (tower_defense_skalierung.md) — Endlos-Modus:
+// kein Wellen-Limit, das Boss/Schwarm/Verschnaufpause-Muster wiederholt sich für immer.
+const SWARM_HP_MULT = 0.6;
+const SWARM_COUNT_MULT = 1.8;
+const BOSS_ESCORT_HP_MULT = 0.7;
+const POST_BOSS_RELIEF_MULT = 0.75;
+
+// Gegner-HP
+const HP_BASE = 50;
+const HP_GROWTH_PER_WAVE = 0.09;         // g
+
+// Turm-Tiers (0–4, also 5 Stufen)
+const TOWER_MAX_TIER = 4;
+const TIER_UPGRADE_COST_BASE = 15;
+const TIER_UPGRADE_COST_GROWTH = 1.7;
+const DAMAGE_GROWTH_SINGLE = 1.40;   // Single-Target-Türme
+const AOE_DAMAGE_GROWTH = 1.25;      // Flächenschaden-Türme
+const AS_GROWTH_PER_TIER = 0.15;
+const AS_CAP_MULT = 2.2;
+const RANGE_GROWTH_PER_TIER = 1.05;
+const RANGE_CAP_MULT = 1.2;
+const RADIUS_GROWTH_PER_TIER = 1.08;
+const RADIUS_CAP_MULT = 1.35;
+
+// Gold-Ökonomie
+const INTEREST_RATE = 0.06;
+const INTEREST_CAP = 30;
+
+function waveType(w) {
+  if (w % 5 === 0) return 'boss';
+  if (w % 5 === 3) return 'swarm';
+  if (w % 5 === 1 && w > 1) return 'relief';
+  return 'normal';
+}
+function baseHp(w) { return HP_BASE * Math.pow(1 + HP_GROWTH_PER_WAVE, w - 1); }
+function bossMult(w) { return 3.0 + 0.3 * ((w / 5) - 1); }
+function baseCount(w) { return 6 + w * 2; }
+function killGoldBase(w) { return 2 * Math.pow(1.045, w - 1); }
+function waveIncome(w) { return 20 + 4 * w; }
+function tierUpgradeCost(nextTier) { return Math.round(TIER_UPGRADE_COST_BASE * Math.pow(TIER_UPGRADE_COST_GROWTH, nextTier)); }
+
+// Spawn-Takt: startet entspannter (900ms) und wird bis Welle 12 auf 500ms schneller.
+// Grund: bei festem 500ms-Takt ist der Schaden-Durchsatz früher Türme rechnerisch
+// nicht ausreichend, um mit dem Nachschub an Gegnern Schritt zu halten (Wellen 1–7
+// waren unschaffbar, siehe Kalkulation). Diese Rampe macht den Start spielbar,
+// ohne die Ziel-HP-Kurve selbst zu verändern.
+function spawnIntervalMs(w) {
+  return Math.max(500, 900 - (w - 1) * (400 / 11));
+}
+
+// Effektive Turmwerte anhand des aktuellen Tiers (0–4)
+function effectiveDamage(t) {
+  const growth = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE;
+  return t.baseDamage * Math.pow(growth, t.tier);
+}
+function effectiveFireRate(t) {
+  const asMult = Math.min(1 + AS_GROWTH_PER_TIER * t.tier, AS_CAP_MULT);
+  return t.baseFireRate / asMult;
+}
+function effectiveRange(t) {
+  const mult = Math.min(Math.pow(RANGE_GROWTH_PER_TIER, t.tier), RANGE_CAP_MULT);
+  return t.baseRange * mult;
+}
+function effectiveSplash(t) {
+  if (!t.baseSplash) return 0;
+  const mult = Math.min(Math.pow(RADIUS_GROWTH_PER_TIER, t.tier), RADIUS_CAP_MULT);
+  return t.baseSplash * mult;
+}
+
+function cellFromPixel(x, y) {
+  return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
+}
+function isBuildable(c, r) {
+  if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
+  if (pathSet.has(`${c},${r}`)) return false;
+  return !towers.some(t => t.c === c && t.r === r);
+}
+
+// UI: tower buttons
+const towerButtonsDiv = document.getElementById('spTowerButtons');
+Object.entries(TOWER_TYPES).forEach(([key, t]) => {
+  const btn = document.createElement('button');
+  btn.className = 'sp-tower-btn';
+  btn.id = 'btn-' + key;
+  btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
+    <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold</div></div>`;
+  btn.onclick = () => selectTower(key);
+  towerButtonsDiv.appendChild(btn);
+});
+
+function selectTower(key) {
+  if (gold < TOWER_TYPES[key].cost) {
+    setMessage(`Nicht genug Gold für ${TOWER_TYPES[key].name}.`);
+    return;
+  }
+  deselectTower();
+  selectedTowerType = (selectedTowerType === key) ? null : key;
+  document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
+  if (selectedTowerType) document.getElementById('btn-' + key).classList.add('sp-selected');
+}
+
+function setMessage(msg) {
+  document.getElementById('spMessage').textContent = msg;
+}
+
+canvas.addEventListener('click', (e) => {
+  if (gameOver) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+  const { c, r } = cellFromPixel(x, y);
+
+  // Select existing tower to open upgrade/sell panel
+  const existing = towers.find(t => t.c === c && t.r === r);
+  if (existing) {
+    selectedTowerType = null;
+    document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
+    selectTowerObject(existing);
+    return;
+  }
+
+  if (selectedTowerType) {
+    if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
+    const type = TOWER_TYPES[selectedTowerType];
+    if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
+    gold -= type.cost;
+    towers.push({
+      c, r, x: c*CELL+CELL/2, y: r*CELL+CELL/2,
+      type: selectedTowerType, ...type, cost: type.cost,
+      baseDamage: type.damage, baseFireRate: type.fireRate,
+      baseRange: type.range, baseSplash: type.splash || 0,
+      tier: 0, cooldown: 0, priority: 'first'
+    });
+    deselectTower();
+    updateStats();
+  }
+});
+
+function updateStats() {
+  document.getElementById('spGoldVal').textContent = gold;
+  document.getElementById('spLivesVal').textContent = lives;
+  document.getElementById('spWaveVal').textContent = wave;
+  document.querySelectorAll('.sp-tower-btn').forEach(btn => {
+    const key = btn.id.replace('btn-', '');
+    btn.style.opacity = gold < TOWER_TYPES[key].cost ? '0.5' : '1';
+  });
+  updateTowerInfoPanel();
+}
+
+function pushEnemy(list, hp, speed, radius, color, reward, isBoss) {
+  list.push({
+    hp, maxHp: hp, speed, baseSpeed: speed, radius, color, reward,
+    isBoss: !!isBoss, wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
+  });
+}
+
+function makeWaveEnemies(w) {
+  const type = waveType(w);
+  const hp0 = baseHp(w);
+  const speed = 1 + Math.min(w * 0.03, 1);
+  const kg = killGoldBase(w);
+  const list = [];
+
+  if (type === 'swarm') {
+    const cnt = Math.round(baseCount(w) * SWARM_COUNT_MULT);
+    const hp = hp0 * SWARM_HP_MULT;
+    for (let i = 0; i < cnt; i++) {
+      pushEnemy(list, hp, speed * 1.15, 8, '#ffd166', Math.round(kg * SWARM_HP_MULT));
+    }
+  } else if (type === 'relief') {
+    const cnt = baseCount(w);
+    const hp = hp0 * POST_BOSS_RELIEF_MULT;
+    for (let i = 0; i < cnt; i++) {
+      pushEnemy(list, hp, speed, 10, '#7cd992', Math.round(kg));
+    }
+  } else if (type === 'boss') {
+    const cnt = Math.round(baseCount(w) * 0.7);
+    const escortHp = hp0 * BOSS_ESCORT_HP_MULT;
+    for (let i = 0; i < cnt; i++) {
+      pushEnemy(list, escortHp, speed, 10, '#ff5e5e', Math.round(kg * BOSS_ESCORT_HP_MULT));
+    }
+    // Boss spawns last -> arrives at the end of the wave
+    const bHp = Math.round(hp0 * bossMult(w));
+    pushEnemy(list, bHp, speed * 0.4, 24, '#e63946', Math.round(kg * bossMult(w)), true);
+  } else { // normal
+    const cnt = baseCount(w);
+    for (let i = 0; i < cnt; i++) {
+      pushEnemy(list, hp0, speed, 10, '#ff5e5e', Math.round(kg));
+    }
+  }
+
+  return list;
+}
+
+document.getElementById('spWaveBtn').addEventListener('click', () => {
+  if (waveActive || gameOver) return;
+  spawnQueue = makeWaveEnemies(wave);
+  spawnTimer = 0;
+  waveActive = true;
+  document.getElementById('spWaveBtn').disabled = true;
+  const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', normal: '' };
+  setMessage(`Welle ${wave} gestartet!${labels[waveType(wave)]}`);
+});
+
+function damageEnemy(enemy, dmg) {
+  enemy.hp -= dmg;
+  if (enemy.hp <= 0) {
+    gold += enemy.reward;
+    enemies = enemies.filter(e => e !== enemy);
+    updateStats();
+  }
+}
+
+function update(dt) {
+  if (gameOver) return;
+
+  // Spawn logic
+  if (spawnQueue.length > 0) {
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      enemies.push(spawnQueue.shift());
+      spawnTimer = spawnIntervalMs(wave);
+    }
+  } else if (waveActive && enemies.length === 0) {
+    waveActive = false;
+    showWaveSummary();
+  }
+
+  // Move enemies
+  const now = performance.now();
+  enemies.forEach(e => {
+    let speed = e.baseSpeed;
+    if (now < e.slowUntil) speed *= 0.5;
+    const target = waypoints[e.wpIndex + 1];
+    if (!target) return;
+    const dx = target.x - e.x, dy = target.y - e.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < speed) {
+      e.x = target.x; e.y = target.y;
+      e.wpIndex++;
+      if (e.wpIndex >= waypoints.length - 1) {
+        lives -= (e.isBoss ? 5 : (e.radius > 12 ? 3 : 1));
+        enemies = enemies.filter(en => en !== e);
+        updateStats();
+        if (lives <= 0) { endGame(); }
+      }
+    } else {
+      e.x += (dx/dist) * speed;
+      e.y += (dy/dist) * speed;
+    }
+  });
+
+  // Towers fire (effective stats derived from each tower's own tier)
+  towers.forEach(t => {
+    t.cooldown -= dt;
+    if (t.cooldown > 0) return;
+    const effRange = effectiveRange(t);
+    let target = null, bestScore = -1;
+    enemies.forEach(e => {
+      const d = Math.hypot(e.x - t.x, e.y - t.y);
+      if (d > effRange) return;
+      const score = t.priority === 'hp' ? e.hp : e.wpIndex;
+      if (score > bestScore) { bestScore = score; target = e; }
+    });
+    if (target) {
+      t.cooldown = effectiveFireRate(t);
+      projectiles.push({
+        x: t.x, y: t.y, target, speed: t.projSpeed,
+        damage: effectiveDamage(t), color: t.color,
+        splash: effectiveSplash(t),
+        slow: t.slow, slowDuration: t.slowDuration,
+      });
+    }
+  });
+
+  // Move projectiles
+  projectiles.forEach(p => {
+    if (!enemies.includes(p.target)) { p.dead = true; return; }
+    const dx = p.target.x - p.x, dy = p.target.y - p.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < p.speed + 5) {
+      if (p.splash) {
+        enemies.slice().forEach(e => {
+          if (Math.hypot(e.x - p.target.x, e.y - p.target.y) <= p.splash) damageEnemy(e, p.damage);
+        });
+      } else {
+        damageEnemy(p.target, p.damage);
+        if (p.slow) p.target.slowUntil = performance.now() + p.slowDuration;
+      }
+      p.dead = true;
+    } else {
+      p.x += (dx/dist) * p.speed;
+      p.y += (dy/dist) * p.speed;
+    }
+  });
+  projectiles = projectiles.filter(p => !p.dead);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // grass grid
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      ctx.fillStyle = (r+c)%2===0 ? '#232a33' : '#212831';
+      ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+    }
+  }
+  // path
+  pathCells.forEach(([c,r]) => {
+    ctx.fillStyle = '#3a3f47';
+    ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+  });
+
+  // buildable hover preview (effective range per tower tier)
+  towers.forEach(t => {
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.arc(t.x, t.y, effectiveRange(t), 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // towers
+  towers.forEach(t => {
+    ctx.beginPath();
+    ctx.fillStyle = t.color;
+    ctx.arc(t.x, t.y, 14, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = '#10151b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  // enemies
+  enemies.forEach(e => {
+    ctx.beginPath();
+    ctx.fillStyle = e.color;
+    ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
+    ctx.fill();
+    // hp bar
+    const w = e.radius*2;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(e.x - w/2, e.y - e.radius - 8, w, 4);
+    ctx.fillStyle = '#7CFC00';
+    ctx.fillRect(e.x - w/2, e.y - e.radius - 8, w * (e.hp/e.maxHp), 4);
+  });
+
+  // projectiles
+  projectiles.forEach(p => {
+    ctx.beginPath();
+    ctx.fillStyle = p.color;
+    ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+
+function loop(ts) {
+  const dt = ts - lastTime;
+  lastTime = ts;
+  update(dt);
+  draw();
+  if (!gameOver) requestAnimationFrame(loop);
+}
+
+function selectTowerObject(tower) {
+  selectedTower = tower;
+  updateTowerInfoPanel();
+}
+
+function deselectTower() {
+  selectedTower = null;
+  document.getElementById('spTowerInfo').style.display = 'none';
+}
+
+function updateTowerInfoPanel() {
+  const panel = document.getElementById('spTowerInfo');
+  if (!selectedTower) { panel.style.display = 'none'; return; }
+  const t = selectedTower;
+  const maxed = t.tier >= TOWER_MAX_TIER;
+  document.getElementById('spTiTitle').textContent = `${TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r})`;
+  document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
+  document.getElementById('spTiDamage').textContent = effectiveDamage(t).toFixed(1);
+  document.getElementById('spTiFireRate').textContent = (1000 / effectiveFireRate(t)).toFixed(2) + '/s';
+  document.getElementById('spTiRange').textContent = Math.round(effectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '');
+  document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
+  document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
+  const upgradeBtn = document.getElementById('spTiUpgradeBtn');
+  if (maxed) {
+    upgradeBtn.textContent = 'Max. Tier erreicht';
+    upgradeBtn.disabled = true;
+  } else {
+    const cost = tierUpgradeCost(t.tier + 1);
+    upgradeBtn.textContent = `Upgrade (${cost} Gold)`;
+    upgradeBtn.disabled = gold < cost;
+  }
+  panel.style.display = 'block';
+}
+
+function setSelectedTowerPriority(priority) {
+  if (!selectedTower) return;
+  selectedTower.priority = priority;
+  updateTowerInfoPanel();
+}
+
+function upgradeSelectedTower() {
+  if (!selectedTower) return;
+  const t = selectedTower;
+  if (t.tier >= TOWER_MAX_TIER) return;
+  const cost = tierUpgradeCost(t.tier + 1);
+  if (gold < cost) { setMessage('Nicht genug Gold für Upgrade.'); return; }
+  gold -= cost;
+  t.tier++;
+  setMessage(`${TOWER_TYPES[t.type].name} auf Tier ${t.tier} verbessert.`);
+  updateTowerInfoPanel();
+  updateStats();
+}
+
+function sellSelectedTower() {
+  if (!selectedTower) return;
+  const refund = Math.floor(selectedTower.cost * 0.6);
+  gold += refund;
+  towers = towers.filter(t => t !== selectedTower);
+  setMessage(`Turm verkauft für ${refund} Gold.`);
+  deselectTower();
+  updateStats();
+}
+
+function showWaveSummary() {
+  const income = waveIncome(wave);
+  const interest = Math.min(Math.floor(gold * INTEREST_RATE), INTEREST_CAP);
+  gold += income + interest;
+  updateStats();
+
+  const nextType = waveType(wave + 1);
+  const nextLabel = { boss: '💀 Nächste Welle ist eine BOSS-Welle!', swarm: '🐝 Nächste Welle ist eine Schwarm-Welle.', relief: '😮\u200d💨 Nächste Welle ist eine Verschnaufpause.', normal: '' }[nextType];
+  document.getElementById('spSummaryTitle').textContent = `Welle ${wave} geschafft! 🎉`;
+  document.getElementById('spSummarySubtitle').textContent = nextLabel || 'Gold-Abrechnung:';
+  document.getElementById('spSumIncome').textContent = `+${income} Gold`;
+  document.getElementById('spSumInterest').textContent = `+${interest} Gold`;
+  document.getElementById('spSumTotal').textContent = `${gold} Gold`;
+  document.getElementById('spUpgradeOverlay').style.display = 'flex';
+}
+
+function continueToNextWave() {
+  document.getElementById('spUpgradeOverlay').style.display = 'none';
+  wave++;
+  document.getElementById('spWaveBtn').disabled = false;
+  setMessage(`Bereit für Welle ${wave}.`);
+  updateStats();
+}
+
+function endGame() {
+  gameOver = true;
+  document.getElementById('spOverlay').style.display = 'flex';
+  document.getElementById('spOverlayTitle').textContent = '💀 Game Over';
+  document.getElementById('spOverlayText').textContent = `Du hast Welle ${wave} erreicht.`;
+}
+
+function restartGame() {
+  gold = 220; lives = 20; wave = 1;
+  towers = []; enemies = []; projectiles = [];
+  selectedTowerType = null; waveActive = false; gameOver = false;
+  spawnQueue = []; spawnTimer = 0;
+  selectedTower = null;
+  document.getElementById('spOverlay').style.display = 'none';
+  document.getElementById('spUpgradeOverlay').style.display = 'none';
+  document.getElementById('spTowerInfo').style.display = 'none';
+  document.getElementById('spWaveBtn').disabled = false;
+  updateStats();
+  setMessage('Neues Spiel gestartet.');
+  requestAnimationFrame(loop);
+}
+
+updateStats();
+
+let spStarted = false;
+window.startSingleplayerMode = function() {
+  if (spStarted) return;
+  spStarted = true;
+  requestAnimationFrame(loop);
+};
+window.setSelectedTowerPriority = setSelectedTowerPriority;
+window.upgradeSelectedTower = upgradeSelectedTower;
+window.sellSelectedTower = sellSelectedTower;
+window.deselectTower = deselectTower;
+window.restartGame = restartGame;
+window.continueToNextWave = continueToNextWave;
+
+})();
+
 </script>
 </body>
 </html>
