@@ -566,82 +566,21 @@
 
 </div><!-- /singleplayerMode -->
 
-
+<script src="js/balance-shared.js"></script>
+<script src="js/balance-multiplayer.js"></script>
 <script>
 // ── Geometrie & Definitionen (identisch zum Einzelspieler-PvP) ──────────
+// Balancing-Werte (Türme, Einheiten, Bosse, Tech-Tree, Tier-Skalierung)
+// stecken jetzt in js/balance-shared.js und js/balance-multiplayer.js
+// (siehe <script>-Tags oben) statt inline hier — siehe docs/balancing.md.
 const CELL = 40;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
 
-const TOWER_TYPES = {
-  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
-  cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45, groundOnly: true },
-  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 550, slow: 0.5, slowDuration: 1500 },
-  mine:   { name: 'Mine',      cost: 60,  color: '#ffd166' },
-};
-const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'mine'];
-const DEFAULT_INCOME_BOOST_RATE = 0.10;
-const UNIT_TYPES = {
-  sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 8 },
-  guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 10 },
-  brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 14 },
-  icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 11, flying: true, incomeBoostRate: 0.05 },
-  titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
-};
-
-const TOWER_MAX_TIER = 4;
-const TIER_COST_BASE = 15, TIER_COST_GROWTH = 1.7;
-const DAMAGE_GROWTH_SINGLE = 1.40, AOE_DAMAGE_GROWTH = 1.25;
-const AS_GROWTH_PER_TIER = 0.15, AS_CAP_MULT = 2.2;
-const RANGE_GROWTH_PER_TIER = 1.05, RANGE_CAP_MULT = 1.2;
-const RADIUS_GROWTH_PER_TIER = 1.08, RADIUS_CAP_MULT = 1.35;
-
-// Einheiten-Upgrades: pro Stufe doppelt so stark (HP), aber 5x so teuer wie die vorige Stufe.
-// Gedeckelt bei Tier 3 (macht x8 HP für x125 der Basis-Kosten - alles darüber wird absurd teuer).
-const UNIT_MAX_TIER = 3;
-const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300 };
-const UNIT_HP_GROWTH_PER_TIER = 2;
-const UNIT_COST_GROWTH_PER_TIER = 5;
-
-// Sende-Limit: max. 20 Einheiten pro rollierendem 10-Sekunden-Fenster (25 mit Angriffs-Tech T3)
-const SEND_LIMIT_COUNT = 20;
-const SEND_LIMIT_COUNT_UPGRADED = 25;
-const SEND_LIMIT_WINDOW_MS = 10000;
-
-// ── Bosse: bedrohen in festen Abständen BEIDE Seiten gleichzeitig ───────
-const BOSS_INTERVAL_MS = 90000; // alle 90s
-const BOSS_BASE_HP = 300;
-const BOSS_HP_GROWTH = 1.3; // pro Boss-Runde
-const BOSS_SPEED = 40;
-const BOSS_RADIUS = 20;
-const BOSS_LEAK_LIVES = 3; // Lebenskosten, falls der Boss durchkommt
-
-// ── Tech-Tree: 3 Zweige, je 4 Stufen, linear (Tier N braucht Tier N-1) ──
-const TECH_MAX_TIER = 4;
-const TECH_BRANCHES = ['defense', 'economy', 'attack'];
-const TECH_LABELS = {
-  defense: { name: '🛡️ Verteidigung', tiers: ['Leben-Regeneration (+1 alle 60s)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
-  economy: { name: '💰 Wirtschaft', tiers: ['Minen-Ertrag +20%', 'Sende-Einkommensschub +5%', 'Grundeinkommen +1 Gold/s', 'Grundeinkommen nochmal +2 Gold/s'] },
-  attack:  { name: '⚔️ Angriff', tiers: ['Lebensklau (+1 eigenes Leben je durchgekommener Einheit)', 'Einheiten-Tempo +10%', 'Sende-Limit 20→25 pro 10s', 'Titan freigeschaltet (Elite-Einheit)'] },
-};
-function techPointCost(tier) { return tier; } // Tier 1 kostet 1 Punkt, Tier 2 kostet 2, usw.
-
-function tierUpgradeCost(nextTier) { return Math.round(TIER_COST_BASE * Math.pow(TIER_COST_GROWTH, nextTier)); }
-function effectiveDamage(t) { const g = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE; return t.baseDamage * Math.pow(g, t.tier); }
-function effectiveFireRate(t) { const m = Math.min(1 + AS_GROWTH_PER_TIER * t.tier, AS_CAP_MULT); return t.baseFireRate / m; }
-function effectiveRange(t) { const m = Math.min(Math.pow(RANGE_GROWTH_PER_TIER, t.tier), RANGE_CAP_MULT); return t.baseRange * m; }
-function effectiveSplash(t) { if (!t.baseSplash) return 0; const m = Math.min(Math.pow(RADIUS_GROWTH_PER_TIER, t.tier), RADIUS_CAP_MULT); return t.baseSplash * m; }
-function mineIncome(t) { return 6 * Math.pow(1.5, t.tier); } // Basis zahlt sich in ~10s aus (60 Gold Kosten), je Tier x1.5
-
 function cellFromPixel(x, y) { return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) }; }
 function cellCenter(c, r) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 }; }
 function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LANE_ROWS && r !== PATH_ROW; }
-function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
-
-function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier); }
-function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier)); }
-function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
 
 // ── Rollen & Verbindung ──────────────────────────────────────────────────
 let roomCode = null;
@@ -1035,6 +974,7 @@ function newStructure(key, c, r) {
       baseDamage: type.damage, baseFireRate: type.fireRate, baseRange: type.range,
       baseSplash: type.splash || 0, projSpeed: type.projSpeed,
       slow: type.slow, slowDuration: type.slowDuration, priority: 'first',
+      groundOnly: !!type.groundOnly,
     });
   }
   return s;
@@ -1528,6 +1468,7 @@ function hideEndOverlay() {
 }
 </script>
 
+<script src="js/balance-singleplayer.js"></script>
 <script>
 (function(){
 
@@ -1546,12 +1487,6 @@ const pathCells = [
 const waypoints = pathCells.map(([c,r]) => ({x: c*CELL + CELL/2, y: r*CELL + CELL/2}));
 const pathSet = new Set(pathCells.map(([c,r]) => `${c},${r}`));
 
-const TOWER_TYPES = {
-  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 6 },
-  cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 4, splash: 45 },
-  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 7, slow: 0.5, slowDuration: 1500 },
-};
-
 let gold = 220;
 let lives = 20;
 let wave = 1;
@@ -1566,74 +1501,10 @@ let spawnQueue = [];
 let spawnTimer = 0;
 let selectedTower = null; // currently selected placed tower (for upgrade/sell panel)
 
-// ── Skalierungs-Spezifikation (tower_defense_skalierung.md) — Endlos-Modus:
-// kein Wellen-Limit, das Boss/Schwarm/Verschnaufpause-Muster wiederholt sich für immer.
-const SWARM_HP_MULT = 0.6;
-const SWARM_COUNT_MULT = 1.8;
-const BOSS_ESCORT_HP_MULT = 0.7;
-const POST_BOSS_RELIEF_MULT = 0.75;
-
-// Gegner-HP
-const HP_BASE = 50;
-const HP_GROWTH_PER_WAVE = 0.09;         // g
-
-// Turm-Tiers (0–4, also 5 Stufen)
-const TOWER_MAX_TIER = 4;
-const TIER_UPGRADE_COST_BASE = 15;
-const TIER_UPGRADE_COST_GROWTH = 1.7;
-const DAMAGE_GROWTH_SINGLE = 1.40;   // Single-Target-Türme
-const AOE_DAMAGE_GROWTH = 1.25;      // Flächenschaden-Türme
-const AS_GROWTH_PER_TIER = 0.15;
-const AS_CAP_MULT = 2.2;
-const RANGE_GROWTH_PER_TIER = 1.05;
-const RANGE_CAP_MULT = 1.2;
-const RADIUS_GROWTH_PER_TIER = 1.08;
-const RADIUS_CAP_MULT = 1.35;
-
-// Gold-Ökonomie
-const INTEREST_RATE = 0.06;
-const INTEREST_CAP = 30;
-
-function waveType(w) {
-  if (w % 5 === 0) return 'boss';
-  if (w % 5 === 3) return 'swarm';
-  if (w % 5 === 1 && w > 1) return 'relief';
-  return 'normal';
-}
-function baseHp(w) { return HP_BASE * Math.pow(1 + HP_GROWTH_PER_WAVE, w - 1); }
-function bossMult(w) { return 3.0 + 0.3 * ((w / 5) - 1); }
-function baseCount(w) { return 6 + w * 2; }
-function killGoldBase(w) { return 2 * Math.pow(1.045, w - 1); }
-function waveIncome(w) { return 20 + 4 * w; }
-function tierUpgradeCost(nextTier) { return Math.round(TIER_UPGRADE_COST_BASE * Math.pow(TIER_UPGRADE_COST_GROWTH, nextTier)); }
-
-// Spawn-Takt: startet entspannter (900ms) und wird bis Welle 12 auf 500ms schneller.
-// Grund: bei festem 500ms-Takt ist der Schaden-Durchsatz früher Türme rechnerisch
-// nicht ausreichend, um mit dem Nachschub an Gegnern Schritt zu halten (Wellen 1–7
-// waren unschaffbar, siehe Kalkulation). Diese Rampe macht den Start spielbar,
-// ohne die Ziel-HP-Kurve selbst zu verändern.
-function spawnIntervalMs(w) {
-  return Math.max(500, 900 - (w - 1) * (400 / 11));
-}
-
-// Effektive Turmwerte anhand des aktuellen Tiers (0–4)
-function effectiveDamage(t) {
-  const growth = t.baseSplash > 0 ? AOE_DAMAGE_GROWTH : DAMAGE_GROWTH_SINGLE;
-  return t.baseDamage * Math.pow(growth, t.tier);
-}
-function effectiveFireRate(t) {
-  const asMult = Math.min(1 + AS_GROWTH_PER_TIER * t.tier, AS_CAP_MULT);
-  return t.baseFireRate / asMult;
-}
-function effectiveRange(t) {
-  const mult = Math.min(Math.pow(RANGE_GROWTH_PER_TIER, t.tier), RANGE_CAP_MULT);
-  return t.baseRange * mult;
-}
-function effectiveSplash(t) {
-  if (!t.baseSplash) return 0;
-  const mult = Math.min(Math.pow(RADIUS_GROWTH_PER_TIER, t.tier), RADIUS_CAP_MULT);
-  return t.baseSplash * mult;
-}
+// Balancing-Werte (SP_TOWER_TYPES, Wellen-Skalierung, Wirtschaft) stecken
+// jetzt in js/balance-singleplayer.js (siehe <script>-Tag oben) statt
+// inline hier — siehe docs/balancing.md. Geteilte Tier-Skalierung (Türme)
+// steht in js/balance-shared.js.
 
 function cellFromPixel(x, y) {
   return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
@@ -1646,7 +1517,7 @@ function isBuildable(c, r) {
 
 // UI: tower buttons
 const towerButtonsDiv = document.getElementById('spTowerButtons');
-Object.entries(TOWER_TYPES).forEach(([key, t]) => {
+Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
   const btn = document.createElement('button');
   btn.className = 'sp-tower-btn';
   btn.id = 'btn-' + key;
@@ -1657,8 +1528,8 @@ Object.entries(TOWER_TYPES).forEach(([key, t]) => {
 });
 
 function selectTower(key) {
-  if (gold < TOWER_TYPES[key].cost) {
-    setMessage(`Nicht genug Gold für ${TOWER_TYPES[key].name}.`);
+  if (gold < SP_TOWER_TYPES[key].cost) {
+    setMessage(`Nicht genug Gold für ${SP_TOWER_TYPES[key].name}.`);
     return;
   }
   deselectTower();
@@ -1689,7 +1560,7 @@ canvas.addEventListener('click', (e) => {
 
   if (selectedTowerType) {
     if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
-    const type = TOWER_TYPES[selectedTowerType];
+    const type = SP_TOWER_TYPES[selectedTowerType];
     if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
     gold -= type.cost;
     towers.push({
@@ -1710,7 +1581,7 @@ function updateStats() {
   document.getElementById('spWaveVal').textContent = wave;
   document.querySelectorAll('.sp-tower-btn').forEach(btn => {
     const key = btn.id.replace('btn-', '');
-    btn.style.opacity = gold < TOWER_TYPES[key].cost ? '0.5' : '1';
+    btn.style.opacity = gold < SP_TOWER_TYPES[key].cost ? '0.5' : '1';
   });
   updateTowerInfoPanel();
 }
@@ -1945,7 +1816,7 @@ function updateTowerInfoPanel() {
   if (!selectedTower) { panel.style.display = 'none'; return; }
   const t = selectedTower;
   const maxed = t.tier >= TOWER_MAX_TIER;
-  document.getElementById('spTiTitle').textContent = `${TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r})`;
+  document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r})`;
   document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
   document.getElementById('spTiDamage').textContent = effectiveDamage(t).toFixed(1);
   document.getElementById('spTiFireRate').textContent = (1000 / effectiveFireRate(t)).toFixed(2) + '/s';
@@ -1978,7 +1849,7 @@ function upgradeSelectedTower() {
   if (gold < cost) { setMessage('Nicht genug Gold für Upgrade.'); return; }
   gold -= cost;
   t.tier++;
-  setMessage(`${TOWER_TYPES[t.type].name} auf Tier ${t.tier} verbessert.`);
+  setMessage(`${SP_TOWER_TYPES[t.type].name} auf Tier ${t.tier} verbessert.`);
   updateTowerInfoPanel();
   updateStats();
 }
