@@ -261,6 +261,9 @@
     text-align: center;
     max-width: 460px;
   }
+  /* Nachtrag (Skip-Button): Pause + "Nächste Welle sofort" nebeneinander statt je volle Breite. */
+  #singleplayerMode .sp-wave-row { display: flex; gap: 6px; }
+  #singleplayerMode .sp-wave-row .sp-action { flex: 1; margin-top: 6px; font-size: 12px; padding: 10px 4px; }
   #singleplayerMode #spGameCanvas {
     background: var(--grass);
     border-radius: 10px;
@@ -588,9 +591,14 @@
 
     <!-- Nachtrag (Popup-Entfernung): "Welle starten ▶" entfällt - Welle 1 startet automatisch beim
          Betreten des Endlos-Modus (siehe startSingleplayerMode()) und jede weitere Welle genauso
-         (advanceToNextWave(), automatisch getriggert). Einzige verbleibende manuelle Kontrolle ist
-         Pause, für alles andere muss nie mehr geklickt werden. -->
-    <button class="sp-action" id="spPauseBtn" title="Spiel pausieren">⏸ Pause</button>
+         (advanceToNextWave(), automatisch getriggert). Manuelle Kontrolle: Pause, und (Nachtrag,
+         auf Nutzeranfrage) ein Skip-Button für die Pause zwischen zwei Wellen - für Spieler, die
+         schon stark genug sind und schneller vorankommen wollen, statt die volle 6s/9s-Wartezeit
+         abzuwarten. Nur während dieser Pause aktiv (siehe spSkipBtn-Handler unten). -->
+    <div class="sp-wave-row">
+      <button class="sp-action" id="spPauseBtn" title="Spiel pausieren">⏸ Pause</button>
+      <button class="sp-action" id="spSkipBtn" title="Nächste Welle sofort starten, ohne die Pause abzuwarten" disabled>⏭ Nächste Welle sofort</button>
+    </div>
     <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen. Doppelklick auf einen eigenen Turm upgradet ihn direkt. Wellen starten automatisch.</div>
   </div>
 
@@ -2038,6 +2046,9 @@ const ctx = canvas.getContext('2d');
 const CELL = 40;
 const COLS = canvas.width / CELL;
 const ROWS = canvas.height / CELL;
+// Tesla-Kettenblitz-Sprungreichweite (Nachtrag): "1 Feld", analog zu TESLA_CHAIN_RANGE im
+// Multiplayer-Script, dort aber 1D-Lane-Distanz - hier echter 2D-Abstand auf dem (c,r)-Baufeld.
+const SP_TESLA_CHAIN_RANGE = CELL;
 
 // Path as grid waypoints (col, row) -> converted to pixel centers
 const pathCells = [
@@ -2081,6 +2092,7 @@ let shieldAccum = 0;       // ms seit letztem Schild-Ladezyklus (Verteidigung T2
 let lifeRegenAccum = 0;    // ms seit letzter Basis-Regeneration (Verteidigung T1)
 let lifeGenAccum = 0;      // ms seit letztem automatischem Extra-Leben (Angriff T1)
 let livesAtWaveStart = 20; // für die "Perfekte Welle"-Prüfung (Wirtschaft T4)
+let mineIncomeAccum = 0;   // ms seit letzter Minen-Auszahlung (Nachtrag: alle SP_MINE_PAYOUT_INTERVAL_MS statt kontinuierlich)
 
 function hasSpTech(branch, tier) { return tech[branch] >= tier; }
 // Effektive Werte inkl. Tech-Boni, on top von den geteilten Tier-Skalierungs-Formeln
@@ -2097,10 +2109,30 @@ function spEffectiveFireRate(t) { return effectiveFireRate(t) / (hasSpTech('atta
 function cellFromPixel(x, y) {
   return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) };
 }
+// Nachtrag (Titan-Turm-Baufeld): Türme können jetzt mehr als eine Zelle belegen (`footprint`, siehe
+// SP_TOWER_TYPES.titan in balance-singleplayer.js - "footprint: 2" = 2×2 = 4 Zellen). `t.c`/`t.r`
+// bleiben die obere linke Zelle des belegten Blocks; towerCells() liefert alle belegten Zellen.
+function towerCells(t) {
+  const n = t.footprint || 1;
+  const cells = [];
+  for (let dc = 0; dc < n; dc++) for (let dr = 0; dr < n; dr++) cells.push([t.c + dc, t.r + dr]);
+  return cells;
+}
+function findTowerAt(c, r) {
+  return towers.find(t => towerCells(t).some(([cc, rr]) => cc === c && rr === r));
+}
 function isBuildable(c, r) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return false;
   if (pathSet.has(`${c},${r}`)) return false;
-  return !towers.some(t => t.c === c && t.r === r);
+  return !towers.some(t => towerCells(t).some(([cc, rr]) => cc === c && rr === r));
+}
+// isBuildableFootprint(): wie isBuildable(), aber für ein n×n-Baufeld ab (c,r) - alle n² Zellen
+// müssen einzeln frei/bebaubar sein, sonst gilt der ganze Block als nicht bebaubar.
+function isBuildableFootprint(c, r, size) {
+  for (let dc = 0; dc < size; dc++) for (let dr = 0; dr < size; dr++) {
+    if (!isBuildable(c + dc, r + dr)) return false;
+  }
+  return true;
 }
 
 // UI: tower buttons — je Turm-Typ ein Bau-Button + ein "⬆ Alle"-Upgrade-Button daneben (Port aus
@@ -2190,7 +2222,7 @@ canvas.addEventListener('click', (e) => {
   const { c, r } = cellFromPixel(x, y);
 
   // Select existing tower to open upgrade/sell panel
-  const existing = towers.find(t => t.c === c && t.r === r);
+  const existing = findTowerAt(c, r);
   if (existing) {
     selectedTowerType = null;
     document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
@@ -2199,16 +2231,22 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (selectedTowerType) {
-    if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
     const type = SP_TOWER_TYPES[selectedTowerType];
+    const footprint = type.footprint || 1;
+    if (footprint > 1) {
+      if (!isBuildableFootprint(c, r, footprint)) { setMessage(`Hier passt kein ${footprint}×${footprint}-Feld-Turm hin (Weg, Rand oder schon belegt).`); return; }
+    } else if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
     if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button ist ohnehin versteckt
     if (selectedTowerType === 'mine' && towers.filter(t => t.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; } // Sicherheitsnetz, Button ist ohnehin gesperrt
     if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
     gold -= type.cost;
     const isMine = selectedTowerType === 'mine';
     towers.push({
-      c, r, x: c*CELL+CELL/2, y: r*CELL+CELL/2,
+      // (c,r) ist bei footprint>1 die obere linke Zelle des belegten Blocks (siehe towerCells()
+      // oben); x/y liegen entsprechend in der Mitte des GESAMTEN Blocks, nicht nur einer Zelle.
+      c, r, footprint, x: c*CELL + (footprint*CELL)/2, y: r*CELL + (footprint*CELL)/2,
       type: selectedTowerType, color: type.color, cost: type.cost, tier: 0, cooldown: 0,
+      groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
       // Minen bekommen bewusst keine Kampfwerte (wie newStructure() im Multiplayer) - sie feuern
       // nie, effectiveDamage/-Range/-FireRate würden mit undefined-Basiswerten sonst NaN liefern.
       ...(isMine ? {} : {
@@ -2231,7 +2269,7 @@ canvas.addEventListener('dblclick', (e) => {
   const x = (e.clientX - rect.left) * (canvas.width / rect.width);
   const y = (e.clientY - rect.top) * (canvas.height / rect.height);
   const { c, r } = cellFromPixel(x, y);
-  const existing = towers.find(t => t.c === c && t.r === r);
+  const existing = findTowerAt(c, r);
   if (existing) {
     selectedTowerType = null;
     document.querySelectorAll('.sp-tower-btn').forEach(b => b.classList.remove('sp-selected'));
@@ -2268,10 +2306,10 @@ function updateStats() {
   updateSpTechUI();
 }
 
-function pushEnemy(list, hp, speed, radius, color, reward, isBoss) {
+function pushEnemy(list, hp, speed, radius, color, reward, isBoss, flying) {
   list.push({
     hp, maxHp: hp, speed, baseSpeed: speed, radius, color, reward,
-    isBoss: !!isBoss, wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
+    isBoss: !!isBoss, flying: !!flying, wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
   });
 }
 
@@ -2303,6 +2341,17 @@ function makeWaveEnemies(w) {
     // Boss spawns last -> arrives at the end of the wave
     const bHp = Math.round(hp0 * bossMult(w));
     pushEnemy(list, bHp, speed * 0.4, 24, '#e63946', Math.round(kg * bossMult(w)), true);
+  } else if (type === 'flying') {
+    // Flieger-Welle (Nachtrag): ab Welle 12, alle 10 Wellen (siehe waveType() in
+    // balance-singleplayer.js). Boden-Türme (Pfeil/Kanone/Frost/Titan) können diese Gegner nur zum
+    // Teil treffen - die Kanone (groundOnly) gar nicht, siehe SP_TOWER_TYPES - der Tesla-Turm
+    // (airOnly) ist der einzige, der NUR sie anvisiert. Etwas weniger HP, aber etwas schneller und
+    // mit Bonus-Belohnung als Ausgleich dafür, dass ein Teil der bestehenden Verteidigung sie nicht
+    // aufhalten kann. Gleiche Anzahl wie eine normale Welle (baseCount(w)).
+    const cnt = baseCount(w);
+    for (let i = 0; i < cnt; i++) {
+      pushEnemy(list, hp0 * 0.8, speed * 1.1, 9, '#38bdf8', Math.round(kg * 1.1), false, true);
+    }
   } else { // normal
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
@@ -2325,8 +2374,18 @@ function startWave() {
   livesAtWaveStart = lives; // für "Perfekte Welle" (Wirtschaft T4) — kein Lebensverlust während der Welle
   waveSummaryText = '';
   document.getElementById('spWaveSub').textContent = '';
-  const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', normal: '' };
+  const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', flying: ' 🦅 Flieger-Welle (Kanone trifft sie nicht, Tesla ist der Spezialist)', normal: '' };
   setMessage(`Welle ${wave} gestartet!${labels[waveType(wave)]}`);
+  updateSkipBtnState();
+}
+
+// updateSkipBtnState() (Nachtrag): hält den "Nächste Welle sofort"-Button in Sync mit
+// autoNextPending/paused/gameOver - nur klickbar, während wirklich eine Pause zwischen zwei Wellen
+// läuft, sonst ausgegraut, damit klar ist, dass er gerade nichts tut.
+function updateSkipBtnState() {
+  const btn = document.getElementById('spSkipBtn');
+  if (!btn) return;
+  btn.disabled = !(autoNextPending && !paused && !gameOver);
 }
 
 document.getElementById('spPauseBtn').addEventListener('click', () => {
@@ -2336,6 +2395,16 @@ document.getElementById('spPauseBtn').addEventListener('click', () => {
   btn.textContent = paused ? '▶ Fortsetzen' : '⏸ Pause';
   btn.title = paused ? 'Fortsetzen' : 'Spiel pausieren';
   if (paused) setMessage('Pausiert.');
+  updateSkipBtnState();
+});
+
+// Nachtrag (Skip-Button, auf Nutzeranfrage): nur während der Pause ZWISCHEN zwei Wellen aktiv
+// (autoNextPending) - überspringt die restliche 6s/9s-Wartezeit und startet die nächste Welle sofort,
+// für Spieler, die stark genug sind, um schneller voranzukommen. Kein Effekt während eine Welle noch
+// läuft (es gibt in dem Moment nichts zu überspringen) oder während Pause aktiv ist.
+document.getElementById('spSkipBtn').addEventListener('click', () => {
+  if (gameOver || paused || !autoNextPending) return;
+  advanceToNextWave();
 });
 
 function damageEnemy(enemy, dmg) {
@@ -2394,11 +2463,10 @@ function update(dt) {
       if (lives < maxLives) { lives++; updateStats(); }
     }
   }
-  // Wirtschaft T3 "Zinsen": zusätzlich zur normalen Wellenend-Verzinsung laufend +1%/s vom
-  // aktuellen Gold — direkte Entsprechung der Multiplayer-Zinsen-Mechanik.
-  if (hasSpTech('economy', 3)) {
-    gold += gold * SP_INTEREST_RATE_PER_SEC_TIER3 * (dt / 1000);
-  }
+  // Wirtschaft T3 "Zinsen" (Nachtrag/Balance-Fix): war kontinuierlich +1%/s, das kompoundierte
+  // 60×/Sekunde auf den laufend wachsenden Goldbestand und war "zu krass" (Nutzer-Feedback). Jetzt
+  // nur noch eine einmalige Zusatzverzinsung bei Wellenabschluss, siehe showWaveSummary() unten -
+  // hier passiert dafür nichts mehr pro Frame.
 
   // Spawn logic
   if (spawnQueue.length > 0) {
@@ -2415,6 +2483,7 @@ function update(dt) {
     // Nachtrag komplett ohne UI-Element, das geklickt werden müsste.
     autoNextPending = true;
     autoNextTimer = waveType(wave + 1) === 'boss' ? SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS : SP_AUTO_NEXT_WAVE_DELAY_MS;
+    updateSkipBtnState(); // jetzt klickbar - Nutzer kann die 6s/9s-Pause überspringen
   }
 
   // Move enemies
@@ -2444,13 +2513,20 @@ function update(dt) {
     }
   });
 
-  // Minen-Einkommen: läuft kontinuierlich pro Frame, wie im Multiplayer (nicht nur am Wellenende).
-  // +20%-Ertragsboost (Wirtschaft T1) ist an dieselbe Tech-Stufe geknüpft, die Minen überhaupt erst
+  // Minen-Einkommen (Nachtrag/Balance-Fix): zahlt jetzt alle SP_MINE_PAYOUT_INTERVAL_MS (5s) den
+  // vollen 5-Sekunden-Ertrag auf einmal aus, statt wie vorher kontinuierlich pro Frame (siehe
+  // SP_MINE_PAYOUT_INTERVAL_MS in balance-singleplayer.js für die volle Begründung). +20%-
+  // Ertragsboost (Wirtschaft T1) ist an dieselbe Tech-Stufe geknüpft, die Minen überhaupt erst
   // freischaltet - wenn Minen existieren, ist die Stufe also zwingend schon unlocked (mirrors
   // mineIncomeMultFor() aus dem Multiplayer).
   if (towers.some(t => t.type === 'mine')) {
-    const mineIncomeMult = hasSpTech('economy', 1) ? (1 + SP_MINE_INCOME_BOOST_TIER1) : 1;
-    gold += mineIncomeTotal(towers) * mineIncomeMult * (dt / 1000);
+    mineIncomeAccum += dt;
+    if (mineIncomeAccum >= SP_MINE_PAYOUT_INTERVAL_MS) {
+      mineIncomeAccum -= SP_MINE_PAYOUT_INTERVAL_MS;
+      const mineIncomeMult = hasSpTech('economy', 1) ? (1 + SP_MINE_INCOME_BOOST_TIER1) : 1;
+      gold += mineIncomeTotal(towers) * mineIncomeMult * (SP_MINE_PAYOUT_INTERVAL_MS / 1000);
+      updateStats();
+    }
   }
 
   // Towers fire (effective stats derived from each tower's own tier + Tech-Tree-Boni)
@@ -2461,6 +2537,11 @@ function update(dt) {
     const effRange = spEffectiveRange(t);
     let target = null, bestScore = -1;
     enemies.forEach(e => {
+      // Flieger-Wellen-Nachtrag: Kanone (groundOnly) kann Flieger nicht treffen, Tesla (airOnly)
+      // kann NUR Flieger treffen - exakt wie im Multiplayer (fireTowers()), siehe SP_TOWER_TYPES
+      // in balance-singleplayer.js für die Begründung.
+      if (t.groundOnly && e.flying) return;
+      if (t.airOnly && !e.flying) return;
       const d = Math.hypot(e.x - t.x, e.y - t.y);
       if (d > effRange) return;
       const score = t.priority === 'hp' ? e.hp : e.wpIndex;
@@ -2473,6 +2554,9 @@ function update(dt) {
         damage: spEffectiveDamage(t), color: t.color,
         splash: effectiveSplash(t),
         slow: t.slow, slowDuration: t.slowDuration,
+        // Tesla-Kettenblitz (Nachtrag): Sprunganzahl nach Tower-Tier, siehe teslaChainJumps() in
+        // balance-multiplayer.js (global verfügbar, identisch zum Multiplayer-Turm).
+        chainJumps: t.type === 'tesla' ? teslaChainJumps(t.tier) : 0,
       });
     }
   });
@@ -2487,6 +2571,28 @@ function update(dt) {
         enemies.slice().forEach(e => {
           if (Math.hypot(e.x - p.target.x, e.y - p.target.y) <= p.splash) damageEnemy(e, p.damage);
         });
+      } else if (p.chainJumps) {
+        // Tesla-Kettenblitz: erster Treffer beim Primärziel, danach springt der Schaden vom jeweils
+        // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel
+        // innerhalb SP_TESLA_CHAIN_RANGE (1 Feld) weiter, bis kein Ziel mehr in Reichweite ist oder
+        // p.chainJumps Sprünge verbraucht sind. Port aus moveProjectiles() im Multiplayer-Script,
+        // hier mit echtem 2D-Abstand statt der MP-1D-Lane-Distanz (SP nutzt ein (c,r)-Baufeld).
+        const hit = new Set();
+        let current = p.target;
+        damageEnemy(current, p.damage);
+        hit.add(current);
+        for (let hop = 0; hop < p.chainJumps; hop++) {
+          let next = null, bestDist = Infinity;
+          enemies.forEach(e => {
+            if (hit.has(e) || !e.flying) return;
+            const d = Math.hypot(e.x - current.x, e.y - current.y);
+            if (d <= SP_TESLA_CHAIN_RANGE && d < bestDist) { bestDist = d; next = e; }
+          });
+          if (!next) break;
+          hit.add(next);
+          damageEnemy(next, p.damage);
+          current = next;
+        }
       } else {
         damageEnemy(p.target, p.damage);
         if (p.slow) p.target.slowUntil = performance.now() + p.slowDuration;
@@ -2525,9 +2631,16 @@ function draw() {
     ctx.fill();
   });
 
-  // towers (Minen etwas kleiner gezeichnet, wie im Multiplayer)
+  // towers (Minen etwas kleiner gezeichnet, wie im Multiplayer; Türme mit footprint>1, aktuell nur
+  // der Titan-Turm, entsprechend größer, damit das belegte 2×2-Baufeld optisch erkennbar bleibt)
   towers.forEach(t => {
-    const radius = t.type === 'mine' ? 12 : 14;
+    const radius = t.type === 'mine' ? 12 : 14 + ((t.footprint || 1) - 1) * 10;
+    if ((t.footprint || 1) > 1) {
+      // Belegtes Baufeld sichtbar umranden, damit klar ist, welche Nachbarzellen dadurch blockiert sind.
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(t.c * CELL, t.r * CELL, t.footprint * CELL, t.footprint * CELL);
+    }
     ctx.beginPath();
     ctx.fillStyle = darkenColor(t.color, t.tier);
     ctx.arc(t.x, t.y, radius, 0, Math.PI*2);
@@ -2551,6 +2664,14 @@ function draw() {
     ctx.fillStyle = e.color;
     ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
     ctx.fill();
+    // Flieger-Kennzeichnung (Nachtrag): weißer Ring, exakt wie im Multiplayer bei fliegenden Einheiten.
+    if (e.flying) {
+      ctx.beginPath();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.arc(e.x, e.y, e.radius + 3, 0, Math.PI*2);
+      ctx.stroke();
+    }
     // hp bar
     const w = e.radius*2;
     ctx.fillStyle = '#000';
@@ -2595,7 +2716,8 @@ function updateTowerInfoPanel() {
   const t = selectedTower;
   const isMine = t.type === 'mine';
   const maxed = t.tier >= TOWER_MAX_TIER;
-  document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r})`;
+  const footprintTag = (t.footprint || 1) > 1 ? `, ${t.footprint}×${t.footprint} Felder` : '';
+  document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r}${footprintTag})`;
   document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
   document.getElementById('spTiFireRateRow').style.display = isMine ? 'none' : 'flex';
   document.getElementById('spTiRangeRow').style.display = isMine ? 'none' : 'flex';
@@ -2605,12 +2727,14 @@ function updateTowerInfoPanel() {
     // wird stattdessen zur Ertrags-Anzeige umgewidmet.
     const mult = hasSpTech('economy', 1) ? (1 + SP_MINE_INCOME_BOOST_TIER1) : 1;
     document.getElementById('spTiDamageLabel').textContent = 'Einkommen';
-    document.getElementById('spTiDamage').textContent = `+${(mineIncome(t) * mult).toFixed(1)} Gold/s`;
+    // Nachtrag: Auszahlung erfolgt jetzt alle SP_MINE_PAYOUT_INTERVAL_MS (5s) statt kontinuierlich -
+    // die Gold/s-Anzeige bleibt die korrekte Durchschnittsrate, nur der Hinweis ist neu.
+    document.getElementById('spTiDamage').textContent = `+${(mineIncome(t) * mult).toFixed(1)} Gold/s (alle 5s ausgezahlt)`;
   } else {
     document.getElementById('spTiDamageLabel').textContent = 'Schaden';
     document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
     document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
-    document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '');
+    document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
     document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
     document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
   }
@@ -2664,7 +2788,12 @@ function showWaveSummary() {
   const perfectWave = hasSpTech('economy', 4) && lives >= livesAtWaveStart;
   if (perfectWave) income *= (1 + SP_PERFECT_WAVE_BONUS_TIER4);
   income = Math.round(income);
-  const interest = Math.min(Math.floor(gold * INTEREST_RATE), INTEREST_CAP);
+  // Wirtschaft T3 "Zinsen" (Nachtrag/Balance-Fix): war kontinuierlich +1%/s, jetzt stattdessen eine
+  // einmalige Zusatzrate hier bei Wellenabschluss, addiert auf den normalen Zinssatz und mit
+  // demselben INTEREST_CAP gedeckelt (siehe SP_INTEREST_RATE_BONUS_TIER3_PER_WAVE in
+  // balance-singleplayer.js für die volle Begründung).
+  const interestRate = INTEREST_RATE + (hasSpTech('economy', 3) ? SP_INTEREST_RATE_BONUS_TIER3_PER_WAVE : 0);
+  const interest = Math.min(Math.floor(gold * interestRate), INTEREST_CAP);
   gold += income + interest;
 
   // Tech-Punkte: +1 pro besiegter Boss-Welle (Endlos-Modus-Entsprechung von "+1 Punkt pro
@@ -2677,7 +2806,7 @@ function showWaveSummary() {
   // als ruhiger Fliesstext in #spWaveSub unter der Karte mit (waveSummaryText, wird in update() pro
   // Countdown-Tick um die Restsekunden ergaenzt), komplett ohne Klick oder Sichtblockade.
   const nextType = waveType(wave + 1);
-  const nextLabel = { boss: '💀 Nächste Welle ist eine BOSS-Welle!', swarm: '🐝 Nächste Welle ist eine Schwarm-Welle.', relief: '😮\u200d💨 Nächste Welle ist eine Verschnaufpause.', normal: '' }[nextType];
+  const nextLabel = { boss: '💀 Nächste Welle ist eine BOSS-Welle!', swarm: '🐝 Nächste Welle ist eine Schwarm-Welle.', relief: '😮\u200d💨 Nächste Welle ist eine Verschnaufpause.', flying: '🦅 Nächste Welle ist eine Flieger-Welle - Tesla bereithalten!', normal: '' }[nextType];
   waveSummaryText = `Welle ${wave} geschafft! 🎉${perfectWave ? ' ✨' : ''} +${income} Gold, +${interest} Zinsen.${nextLabel ? ' ' + nextLabel : ''}`;
   document.getElementById('spWaveSub').textContent = waveSummaryText;
 }
@@ -2713,13 +2842,14 @@ function endGame() {
   document.getElementById('spOverlay').style.display = 'flex';
   document.getElementById('spOverlayTitle').textContent = '💀 Game Over';
   document.getElementById('spOverlayText').textContent = `Du hast Welle ${wave} erreicht.`;
+  updateSkipBtnState();
 }
 
 function restartGame() {
   gold = 220; lives = 20; maxLives = 20; wave = 1;
   towers = []; enemies = []; projectiles = [];
   selectedTowerType = null; waveActive = false; gameOver = false; paused = false;
-  autoNextPending = false; autoNextTimer = 0; waveSummaryText = '';
+  autoNextPending = false; autoNextTimer = 0; waveSummaryText = ''; mineIncomeAccum = 0;
   spawnQueue = []; spawnTimer = 0;
   selectedTower = null;
   techPoints = 0; techPointsBought = 0; tech = { defense: 0, economy: 0, attack: 0 };
@@ -2747,7 +2877,7 @@ SP_TECH_BRANCHES.forEach(branch => {
     html += `<div class="tech-node" id="sp-tech-${branch}-${tier}" onclick="unlockSpTech('${branch}')">
       <div class="tech-tier-badge">${tier}</div>
       <div class="tech-desc">${SP_TECH_LABELS[branch].tiers[tier - 1]}</div>
-      <div class="tech-cost">${spTechPointCost(tier)}P</div>
+      <div class="tech-cost">${spTechPointCost(tier, branch)}P</div>
     </div>`;
   }
   wrap.innerHTML = html;
@@ -2765,7 +2895,7 @@ function updateSpTechUI() {
     const currentTier = tech[branch];
     for (let tier = 1; tier <= SP_TECH_MAX_TIER; tier++) {
       const node = document.getElementById(`sp-tech-${branch}-${tier}`);
-      const cost = spTechPointCost(tier);
+      const cost = spTechPointCost(tier, branch);
       const unlocked = currentTier >= tier;
       const available = !unlocked && currentTier === tier - 1 && techPoints >= cost;
       node.classList.toggle('unlocked', unlocked);
@@ -2780,7 +2910,7 @@ function unlockSpTech(branch) {
   if (gameOver) return;
   const nextTier = tech[branch] + 1;
   if (nextTier > SP_TECH_MAX_TIER) return;
-  const cost = spTechPointCost(nextTier);
+  const cost = spTechPointCost(nextTier, branch);
   if (techPoints < cost) { setMessage('Nicht genug Tech-Punkte. Boss-Wellen besiegen oder Punkte mit Gold kaufen!'); return; }
   techPoints -= cost;
   tech[branch] = nextTier;

@@ -70,13 +70,27 @@ function darkenColor(hex, tier) {
   const b = Math.round((n & 255) * factor);
   return `rgb(${r},${g},${b})`;
 }
+// Nachtrag (Balance/Optik): bei 5+ Sternen nebeneinander wurde die Anzeige "zu heftig" (Nutzer-
+// Feedback, gilt für beide Modi) - viele kleine Sterne in einer Reihe sind bei Tier 25+ kaum noch
+// zu unterscheiden und wirken visuell überladen. Ab 5 Sternen (Tier 25) deshalb EIN großer Stern,
+// der den Kreis ausfüllt, mit der Sternanzahl (5, 6, 7, ... bis 10 bei Tier 50) als Zahl darin -
+// bis 4 Sterne (Tier < 25) bleibt die bisherige Reihen-Darstellung, da die dort noch gut lesbar ist.
 function drawLevelStars(ctx, x, y, tier) {
   // Sternanzahl-Deckel 4 → 10 mitgezogen (Max-Tier jetzt 50 statt 10, weiterhin 1 Stern alle 5
   // Stufen — bei Tier 50 sind das genau 10 Sterne).
   const stars = Math.min(Math.floor(tier / 5), 10);
   if (stars < 1) return;
-  ctx.fillStyle = '#ffd700';
-  ctx.font = 'bold 8px sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('★'.repeat(stars), x, y);
+  if (stars <= 4) {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.fillText('★'.repeat(stars), x, y);
+  } else {
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('★', x, y);
+    ctx.fillStyle = '#1a1200';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.fillText(String(stars), x, y + 1);
+  }
 }
