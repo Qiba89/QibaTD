@@ -86,3 +86,73 @@ function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine'
 function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier); }
 function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * Math.pow(UNIT_HP_GROWTH_PER_TIER, tier)); }
 function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
+
+// ── KI-Gegner: 3 Schwierigkeitsgrade, ersetzt Spieler 2 wenn kein echter Mitspieler da ist ──
+// Die KI läuft komplett auf der Host-Seite (im selben Browser wie der menschliche Spieler) und
+// ruft dieselben host*()-Funktionen mit forGuest=true auf wie ein echter Gast über die Aktions-
+// Queue - sie braucht also KEINE Server-/WebSocket-Verbindung. Logik selbst steht in index.html
+// (aiTick/aiDecide/...), hier nur die abgestimmten Zahlen pro Schwierigkeitsgrad.
+//
+// decisionIntervalMs / sendIntervalMs = "Reaktionsgeschwindigkeit" (wie oft die KI neu plant bzw.
+// Einheiten schickt) - das ist der Haupthebel für "Tempo". reserveGoldRatio = welchen Anteil ihres
+// Goldes die KI immer zurückhält, statt ihn sofort zu verbauen (niedriger = aggressiver/optimaler
+// Kapitaleinsatz). targetTowersBase/PerBossRound und targetMinesBase/PerBossRound geben vor, wie
+// viele Türme/Minen die KI anstrebt (wächst mit der Zeit, wie beim menschlichen Spieler auch).
+// techPriority = feste Reihenfolge, in der Tech-Zweige hochgezogen werden (null = adaptiv, siehe
+// aiPickTechBranch() in index.html). unitUpgradeChance = Wahrscheinlichkeit pro Entscheidungs-Tick,
+// dass die KI statt eines Turms lieber einen Einheiten-Tier upgradet.
+const AI_PROFILES = {
+  beginner: {
+    label: 'Anfänger',
+    // Solides, spürbares Tempo (nicht bewusst verlangsamt) aber "Grundlogik" statt Reaktion auf
+    // den Spieler - deshalb adaptive:false und eine großzügige Gold-Reserve (spielt nicht bis aufs
+    // letzte Gold aus).
+    decisionIntervalMs: 1600, sendIntervalMs: 2600, sendBurst: 1,
+    reserveGoldRatio: 0.30,
+    targetMinesBase: 3, targetMinesPerBossRound: 0.5,
+    targetTowersBase: 6, targetTowersPerBossRound: 1.0,
+    towerWeights: { arrow: 0.55, frost: 0.30, cannon: 0.15 },
+    unitWeights: { sprinter: 0.45, guard: 0.30, icecube: 0.15, brecher: 0.10 },
+    // Wirtschaft zuerst (wie gefordert), danach Verteidigung, Angriffs-Tech zuletzt.
+    techPriority: ['economy', 'defense', 'attack'],
+    techBuyThresholdGold: 1500,
+    unitUpgradeChance: 0.20,
+    upgradeTowerShare: 0.5,
+    adaptive: false,
+  },
+  challenger: {
+    label: 'Herausforderer',
+    // Deutlich schnelleres Tempo + kleinere Reserve = aggressiverer Kapitaleinsatz und mehr
+    // Einheiten pro Zeiteinheit als der Anfänger.
+    decisionIntervalMs: 1000, sendIntervalMs: 1600, sendBurst: 2,
+    reserveGoldRatio: 0.15,
+    targetMinesBase: 3, targetMinesPerBossRound: 0.4,
+    targetTowersBase: 8, targetTowersPerBossRound: 1.2,
+    towerWeights: { arrow: 0.45, frost: 0.30, cannon: 0.25 },
+    unitWeights: { sprinter: 0.35, guard: 0.25, icecube: 0.20, brecher: 0.20 },
+    // Verteidigung zuerst (wie gefordert - stabile eigene Basis trotz aggressivem Spiel), dann Angriff.
+    techPriority: ['defense', 'attack', 'economy'],
+    techBuyThresholdGold: 900,
+    unitUpgradeChance: 0.35,
+    upgradeTowerShare: 0.5,
+    adaptive: false,
+  },
+  worldender: {
+    label: 'Weltenender',
+    // Schnellste Reaktion, kleinste Reserve (setzt ihr Gold fast vollständig ein) und adaptive:true -
+    // Turm-/Einheiten-Gewichtung und Tech-Zweig-Wahl reagieren live auf den Spielzustand
+    // (siehe aiAdaptiveTowerWeights/aiAdaptiveUnitWeights/aiPickTechBranch in index.html), statt
+    // einer festen Reihenfolge zu folgen.
+    decisionIntervalMs: 450, sendIntervalMs: 900, sendBurst: 3,
+    reserveGoldRatio: 0.05,
+    targetMinesBase: 5, targetMinesPerBossRound: 0.6,
+    targetTowersBase: 10, targetTowersPerBossRound: 1.5,
+    towerWeights: { arrow: 0.40, frost: 0.30, cannon: 0.30 }, // Basiswerte, werden adaptiv überschrieben
+    unitWeights: { sprinter: 0.30, guard: 0.20, icecube: 0.25, brecher: 0.25 }, // s.o.
+    techPriority: null,
+    techBuyThresholdGold: 400,
+    unitUpgradeChance: 0.45,
+    upgradeTowerShare: 0.6,
+    adaptive: true,
+  },
+};

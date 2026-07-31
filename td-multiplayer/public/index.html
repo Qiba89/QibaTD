@@ -59,6 +59,20 @@
   #lobby .btn-join { background: var(--accent); color: #1a1200; }
   #lobbyMsg { font-size: 12px; color: #aab3bd; min-height: 32px; margin-top: 8px; }
 
+  .lobby-divider { text-align: center; font-size: 11px; color: #667; margin: 6px 0 10px 0; }
+  #aiSection { margin-top: 4px; padding-top: 14px; border-top: 1px solid #2c333c; text-align: left; }
+  .ai-btn-row { display: flex; gap: 8px; }
+  .ai-btn {
+    flex: 1; padding: 10px 6px; border: 2px solid #2a323c; border-radius: 8px;
+    background: #1b2129; cursor: pointer; text-align: center;
+  }
+  .ai-btn:hover { border-color: var(--accent2); background: #232c36; }
+  .ai-btn .ai-name { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
+  .ai-btn .ai-desc { font-size: 10px; color: #aab3bd; line-height: 1.3; }
+  .ai-beginner .ai-name { color: var(--accent2); }
+  .ai-challenger .ai-name { color: var(--accent); }
+  .ai-worldender .ai-name { color: var(--danger); }
+
   #openRoomsSection { margin-top: 18px; padding-top: 14px; border-top: 1px solid #2c333c; text-align: left; }
   #openRoomsList { max-height: 220px; overflow-y: auto; }
   .rooms-empty { font-size: 12px; color: #aab3bd; text-align: center; padding: 10px 0; }
@@ -434,6 +448,25 @@
   <button class="btn-join" onclick="joinRoom()">Raum beitreten (Spieler 2)</button>
   <div id="lobbyMsg">Einer von euch klickt "Raum erstellen", teilt den Code, der/die andere klickt "Raum beitreten" mit demselben Code.</div>
 
+  <div class="lobby-divider">— oder, falls gerade kein Mitspieler da ist —</div>
+  <div id="aiSection">
+    <h3>🤖 Gegen KI spielen</h3>
+    <div class="ai-btn-row">
+      <button class="ai-btn ai-beginner" onclick="startAiMatch('beginner')">
+        <div class="ai-name">Anfänger</div>
+        <div class="ai-desc">Gutes Tempo, Grundlogik, setzt auf Wirtschaft</div>
+      </button>
+      <button class="ai-btn ai-challenger" onclick="startAiMatch('challenger')">
+        <div class="ai-name">Herausforderer</div>
+        <div class="ai-desc">Spielt aggressiv, setzt auf Verteidigungs-Tech</div>
+      </button>
+      <button class="ai-btn ai-worldender" onclick="startAiMatch('worldender')">
+        <div class="ai-name">Weltenender</div>
+        <div class="ai-desc">Optimal &amp; maximal aggressiv, reagiert auf dich</div>
+      </button>
+    </div>
+  </div>
+
   <div id="openRoomsSection">
     <h3>Offene Räume</h3>
     <div id="openRoomsList"><div class="rooms-empty">Suche offene Räume…</div></div>
@@ -607,6 +640,11 @@ let countdownAccum = 0; // nur Host: Zähler für die Countdown-Sekunden
 let nextEntityId = 1; // nur Host: eindeutige IDs für Einheiten/Projektile (für Interpolation beim Gast)
 let prevState = null, prevStateTime = 0, stateTime = 0; // nur Gast: für flüssige Zwischenschritt-Animation
 
+// KI ersetzt Spieler 2 (kein echter Gast, kein Netzwerk nötig) - siehe Abschnitt "KI-Gegner" unten.
+let aiMode = false;
+let aiDifficulty = null; // 'beginner' | 'challenger' | 'worldender'
+let aiDecisionAccum = 0, aiSendAccum = 0;
+
 // WICHTIG: Trage hier die Adresse deines Multiplayer-Servers ein (siehe Deployment-Anleitung).
 // Solange die Domain noch nicht läuft, kannst du hier auch die onrender.com-Adresse eintragen.
 // Verbindet sich automatisch mit dem Server, der diese Seite ausliefert.
@@ -762,8 +800,10 @@ function enterGame() {
   document.getElementById('lobby').style.display = 'none';
   document.getElementById('game').style.display = 'flex';
   document.getElementById('meLabel').textContent = isHost ? 'DU (Spieler 1)' : 'DU (Spieler 2)';
-  document.getElementById('oppLabel').textContent = isHost ? 'GEGNER (Spieler 2)' : 'GEGNER (Spieler 1)';
-  setConnStatus(false);
+  document.getElementById('oppLabel').textContent = aiMode
+    ? `GEGNER (KI – ${AI_PROFILES[aiDifficulty].label})`
+    : (isHost ? 'GEGNER (Spieler 2)' : 'GEGNER (Spieler 1)');
+  setConnStatus(aiMode);
   buildPalette();
   updateUIFromState();
 }
@@ -1099,6 +1139,7 @@ function hostSetReady(ready, forGuest) {
 function hostRematch() {
   const fresh = freshState();
   Object.assign(state, fresh);
+  if (aiMode) { state.p2Ready = true; aiDecisionAccum = 0; aiSendAccum = 0; } // KI ist beim Rematch sofort wieder bereit
 }
 function hostUpgradeUnit(key, forGuest) {
   const tiers = forGuest ? state.p2UnitTiers : state.p1UnitTiers;
@@ -1266,6 +1307,7 @@ function hostUpdate(dt) {
 
   tickBossSpawn(dt);
   tickPlayerTimers(dt);
+  if (aiMode) aiTick(dt);
 
   // Einheiten, die durchkommen, verlieren dem Ziel ein Leben - überleben aber (außer Bosse) und
   // laufen sofort in die jeweils andere Spur weiter (mit ihren aktuellen HP), bis sie sterben.
@@ -1363,6 +1405,195 @@ function hostUnlockTech(branch, forGuest) {
   }
 }
 
+// ── KI-Gegner (ersetzt Spieler 2, läuft rein lokal beim Host, kein Netzwerk nötig) ──────────
+// Ruft dieselben host*()-Funktionen mit forGuest=true auf, die auch ein echter Gast über die
+// Aktions-Queue auslösen würde - die KI ist aus Sicht der Spiellogik einfach "Spieler 2".
+// Zahlen/Parameter pro Schwierigkeitsgrad stehen in AI_PROFILES (js/balance-multiplayer.js),
+// Begründung dort und in docs/balancing.md.
+
+function startAiMatch(difficulty) {
+  stopRoomsPolling();
+  roomCode = null;
+  myRole = 'p1'; isHost = true;
+  aiMode = true; aiDifficulty = difficulty;
+  aiDecisionAccum = 0; aiSendAccum = 0;
+  state = freshState();
+  hostSetReady(true, true); // KI ist immer sofort bereit, es muss nur der Mensch noch bestätigen
+  enterGame();
+  setMessage(`Match gegen KI (${AI_PROFILES[difficulty].label}) gestartet. Klick "Bereit ✅", um loszulegen.`);
+  requestAnimationFrame(hostLoop);
+  // Kein setInterval(hostBroadcast, ...) - es gibt keinen Gast, an den gesendet werden müsste,
+  // und die KI braucht daher auch keine funktionierende Server-/WebSocket-Verbindung.
+}
+
+function aiProfile() { return AI_PROFILES[aiDifficulty]; }
+
+// Spalten-Reihenfolge, die früh über die ganze Spurbreite streut statt stur links anzufangen
+// (bessere Feld-Abdeckung schon mit wenigen Türmen) - simple Bisektion von [0, n-1].
+function spreadOrder(n) {
+  const order = [];
+  const queue = [[0, n - 1]];
+  while (queue.length) {
+    const [lo, hi] = queue.shift();
+    if (lo > hi) continue;
+    const mid = Math.floor((lo + hi) / 2);
+    order.push(mid);
+    queue.push([lo, mid - 1], [mid + 1, hi]);
+  }
+  return order;
+}
+const AI_COL_ORDER = spreadOrder(LANE_COLS);
+const AI_ROW_ORDER = [1, 3, 0]; // Reihen direkt am Pfad zuerst (mehr Feuerüberlappung), äußere Reihe zuletzt
+
+function aiFindBuildSpot() {
+  for (const r of AI_ROW_ORDER) {
+    for (const c of AI_COL_ORDER) {
+      if (!isBuildable(c, r)) continue;
+      if (state.p2Structures.some(s => s.c === c && s.r === r)) continue;
+      return { c, r };
+    }
+  }
+  return null; // Feld voll
+}
+
+// Gewichtete Zufallsauswahl unter den Optionen, die filterFn erfüllen (i.d.R. "kann ich mir leisten").
+function aiWeightedPick(weights, filterFn) {
+  const entries = Object.keys(weights).filter(k => weights[k] > 0 && filterFn(k)).map(k => [k, weights[k]]);
+  if (!entries.length) return null;
+  const total = entries.reduce((s, [, w]) => s + w, 0);
+  let roll = Math.random() * total;
+  for (const [k, w] of entries) { roll -= w; if (roll <= 0) return k; }
+  return entries[entries.length - 1][0];
+}
+
+// Nur Weltenender: reagiert auf den Anteil fliegender Einheiten, die der Spieler gerade schickt -
+// Kanonen können Flieger nicht treffen, also bei viel Flieger-Anteil weniger Kanonen, mehr Frost/Pfeil.
+function aiAdaptiveTowerWeights() {
+  const incoming = state.unitsOnLaneP2;
+  const flyingShare = incoming.length ? incoming.filter(u => u.flying).length / incoming.length : 0;
+  const cannon = Math.max(0.05, 0.30 - flyingShare * 0.25);
+  const frost = 0.30 + flyingShare * 0.10;
+  const arrow = Math.max(0.1, 1 - cannon - frost);
+  return { arrow, frost, cannon };
+}
+
+// Nur Weltenender: je stärker die gegnerische Verteidigung (mehr/höherstufige Türme), desto mehr
+// auf robuste Einheiten setzen statt nur auf billige Masse.
+function aiAdaptiveUnitWeights() {
+  const oppTowers = state.p1Structures.filter(s => s.type !== 'mine');
+  const avgTier = oppTowers.length ? oppTowers.reduce((s, t) => s + t.tier, 0) / oppTowers.length : 0;
+  const strength = Math.min(1, (oppTowers.length / 12) * 0.5 + (avgTier / TOWER_MAX_TIER) * 0.5);
+  const weights = {
+    sprinter: Math.max(0.10, 0.35 - strength * 0.15),
+    guard: 0.20,
+    icecube: 0.20 + strength * 0.05,
+    brecher: 0.15 + strength * 0.20,
+  };
+  if (state.p2Tech.attack >= 4) weights.titan = 0.10 + strength * 0.15; // Titan erst ab Angriffs-Tech-Tier 4 nutzbar
+  return weights;
+}
+
+// Nur Weltenender: statt fester Reihenfolge den Zweig mit der aktuell niedrigsten Stufe wählen
+// (balanciertes, nah-optimales Wachstum statt einseitiger Spezialisierung).
+function aiPickTechBranch(tech) {
+  const order = ['defense', 'economy', 'attack'];
+  let best = null;
+  order.forEach(b => { if (tech[b] < TECH_MAX_TIER && (!best || tech[b] < tech[best])) best = b; });
+  return best;
+}
+
+function aiUpgradeCheapestTowers(budget) {
+  if (budget <= 0) return;
+  const candidates = state.p2Structures.filter(s => s.type !== 'mine' && s.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier);
+  let spent = 0;
+  for (const s of candidates) {
+    const cost = tierUpgradeCost(s.tier + 1);
+    if (spent + cost > budget) continue; // aufsteigend sortiert, aber Kosten variieren pro Turm-Typ - weiterprobieren statt abbrechen
+    if (state.p2Gold < cost) break;
+    hostUpgrade(s.c, s.r, true);
+    spent += cost;
+  }
+}
+
+function aiUpgradeCheapestUnitTier(profile) {
+  const keys = Object.keys(UNIT_TYPES).filter(k => {
+    const u = UNIT_TYPES[k];
+    return !u.requiresTech || state.p2Tech[u.requiresTech.branch] >= u.requiresTech.tier;
+  });
+  if (!keys.length) return;
+  keys.sort((a, b) => state.p2UnitTiers[a] - state.p2UnitTiers[b]);
+  const key = keys[0];
+  if (state.p2UnitTiers[key] >= UNIT_MAX_TIER) return;
+  const cost = unitUpgradeCost(key, state.p2UnitTiers[key] + 1);
+  if (state.p2Gold - cost >= state.p2Gold * profile.reserveGoldRatio) hostUpgradeUnit(key, true);
+}
+
+function aiDecide(profile) {
+  // 1) Verfügbare Tech-Punkte einsetzen
+  if (state.p2TechPoints > 0) {
+    const branch = profile.adaptive ? aiPickTechBranch(state.p2Tech) : profile.techPriority.find(b => state.p2Tech[b] < TECH_MAX_TIER);
+    if (branch) hostUnlockTech(branch, true);
+  }
+  // 2) Tech-Punkt mit Gold kaufen, wenn danach immer noch komfortabel Gold übrig bleibt
+  const buyCost = techPointBuyCost(state.p2TechPointsBought + 1);
+  if (state.p2Gold - buyCost >= profile.techBuyThresholdGold) hostBuyTechPoint(true);
+
+  // 3) Wirtschaft: Minen bis Zielanzahl bauen
+  const mineCount = state.p2Structures.filter(s => s.type === 'mine').length;
+  const targetMines = Math.round(profile.targetMinesBase + profile.targetMinesPerBossRound * state.bossRound);
+  const reserve = state.p2Gold * profile.reserveGoldRatio;
+  if (mineCount < targetMines && state.p2Gold - TOWER_TYPES.mine.cost >= reserve) {
+    const spot = aiFindBuildSpot();
+    if (spot) hostBuild('mine', spot.c, spot.r, true);
+  }
+
+  // 4) Verteidigung: Türme bis Zielanzahl bauen, danach vorhandene upgraden
+  const towerCount = state.p2Structures.filter(s => s.type !== 'mine').length;
+  const targetTowers = Math.round(profile.targetTowersBase + profile.targetTowersPerBossRound * state.bossRound);
+  const towerWeights = profile.adaptive ? aiAdaptiveTowerWeights() : profile.towerWeights;
+  if (towerCount < targetTowers) {
+    const key = aiWeightedPick(towerWeights, k => state.p2Gold - TOWER_TYPES[k].cost >= reserve);
+    if (key) {
+      const spot = aiFindBuildSpot();
+      if (spot) hostBuild(key, spot.c, spot.r, true);
+    }
+  } else {
+    aiUpgradeCheapestTowers(Math.max(0, state.p2Gold - reserve) * profile.upgradeTowerShare);
+  }
+
+  // 5) Gelegentlich eigene Einheiten-Tiers hochziehen, statt immer nur neue Türme/Minen
+  if (Math.random() < profile.unitUpgradeChance) aiUpgradeCheapestUnitTier(profile);
+}
+
+function aiConsiderSending(profile) {
+  const unitWeights = profile.adaptive ? aiAdaptiveUnitWeights() : profile.unitWeights;
+  for (let i = 0; i < profile.sendBurst; i++) {
+    if (!canSend(state.p2SendTimes, sendLimitFor(state.p2Tech))) break;
+    const key = aiWeightedPick(unitWeights, k => {
+      const u = UNIT_TYPES[k];
+      if (u.requiresTech && state.p2Tech[u.requiresTech.branch] < u.requiresTech.tier) return false;
+      return state.p2Gold >= unitSendCost(k, state.p2UnitTiers[k]);
+    });
+    if (!key) break;
+    hostSendUnit(key, true);
+  }
+}
+
+function aiTick(dt) {
+  if (state.phase !== 'playing') return;
+  const profile = aiProfile();
+  aiDecisionAccum += dt;
+  if (aiDecisionAccum >= profile.decisionIntervalMs) {
+    aiDecisionAccum -= profile.decisionIntervalMs;
+    aiDecide(profile);
+  }
+  aiSendAccum += dt;
+  if (aiSendAccum >= profile.sendIntervalMs) {
+    aiSendAccum -= profile.sendIntervalMs;
+    aiConsiderSending(profile);
+  }
+}
+
 // ── Gast: zeichnen + UI-Sync im eigenen Animationstakt (nicht bei jeder Netzwerknachricht) ──
 function guestRenderLoop(ts) {
   const dt = ts - lastTime; lastTime = ts;
@@ -1373,7 +1604,7 @@ function guestRenderLoop(ts) {
 
 function setConnStatus(online) {
   const el = document.getElementById('connStatus');
-  el.textContent = online ? '🟢 Gegner verbunden' : '⚪ Warte auf Gegner…';
+  el.textContent = aiMode ? '🤖 KI aktiv' : (online ? '🟢 Gegner verbunden' : '⚪ Warte auf Gegner…');
   el.classList.toggle('online', online);
 }
 
