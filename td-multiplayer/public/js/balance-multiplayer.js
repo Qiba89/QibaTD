@@ -8,6 +8,23 @@ const TOWER_TYPES = {
   arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 9,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45, groundOnly: true },
   frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 550, slow: 0.5, slowDuration: 1500 },
+  // Tesla-Turm (Nachtrag): reiner Anti-Air-Spezialist - feuert NUR auf Fliegende (`airOnly`,
+  // Gegenstück zu `groundOnly` bei der Kanone), dafür mit Kettenblitz (siehe `teslaChainJumps()`
+  // unten und moveProjectiles() in index.html): der Schaden springt beim Einschlag von Ziel zu Ziel
+  // weiter, solange ein weiteres noch nicht getroffenes fliegendes Ziel innerhalb 1 Feld (siehe
+  // TESLA_CHAIN_RANGE in index.html) vom zuletzt getroffenen Ziel entfernt ist. Sprunganzahl wächst
+  // mit dem Turm-Tier: 1 (Basis) → 2 (ab Tier 10) → 3 (ab Tier 20) → 5 (ab Tier 30).
+  // Kosten/Reichweite wie Kanone (wie angefragt: "Spezialist"). Schaden bewusst NICHT wie Kanone
+  // (das wäre die AoE-Kurve, DAMAGE_CAP_MULT_AOE=2.6 in balance-shared.js) - Tesla trifft pro Ziel
+  // EINZELN (kein Flächenradius, `splash` bleibt 0), nutzt also automatisch die höhere Einzelziel-
+  // Kurve (DAMAGE_CAP_MULT_SINGLE=4.5, wie Pfeil-/Frostturm). Basis-Schaden 8 = ca. 33% der Kanone
+  // (25 × 0.33 ≈ 8.25, abgerundet), wie vom Nutzer vorgeschlagen: gegen ein einzelnes fliegendes
+  // Ziel bleibt Tesla dadurch klar schwächer als der Pfeilturm (Basis 9, gleiche Kurve, aber
+  // schnellere Feuerrate 500ms statt 1100ms hier) - der eigentliche Wert kommt erst durch die Kette
+  // gegen mehrere geclusterte Flieger (z.B. eine gezielte Ice-Cube-Schwarm-Taktik des Gegners) sowie
+  // dadurch, dass Tesla ab Tier 50 der EINZIGE Turm ist, der einen Tier-50-Ice-Cube noch anvisieren
+  // kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt "Tesla-Turm".
+  tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 500, airOnly: true },
   // Kosten 60 → 100: bei 60 war die Amortisationszeit (10s bis der Grund-Ertrag von 6 Gold/s die
   // Kosten wieder reingeholt hat) zu kurz - eine Mine war praktisch risikofrei sofort im Vorteil.
   // Bei 100 sind es ~16.7s Amortisation, spürbar mehr Risiko/Opportunitätskosten (das Gold hätte in
@@ -15,19 +32,40 @@ const TOWER_TYPES = {
   // (6 Gold/s Basis) bewusst unverändert, siehe mineIncome() unten.
   mine:   { name: 'Mine',      cost: 100, color: '#ffd166' },
 };
-const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'mine'];
+const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'mine'];
+
+// Tesla-Kettenblitz: Sprunganzahl nach Turm-Tier gestaffelt (siehe TOWER_TYPES.tesla-Kommentar
+// oben). Gedeckelt bei Tier 30 (nicht weiter bei Tier 50 gestiegen) - 5 gleichzeitig getroffene
+// Flieger sind schon ein sehr hoher Deckenwert, mehr würde bei dichten Schwärmen zu einseitig werden.
+function teslaChainJumps(tier) {
+  if (tier >= 30) return 5;
+  if (tier >= 20) return 3;
+  if (tier >= 10) return 2;
+  return 1;
+}
 const DEFAULT_INCOME_BOOST_RATE = 0.10;
 
-// Minen-Anzahl-Limit: 7 pro Spieler. Ohne Limit ist bei jetzt 50 Tier-Stufen (siehe unten) sonst
-// eine "je mehr Minen, desto besser"-Strategie ohne Gegenwert möglich - Minen-Ertrag ist rein
-// additiv und passiv, kostet anders als Türme keine laufende Aufmerksamkeit/Zielauswahl. Ein Limit
-// erzwingt eine echte Boden-vs-Wirtschaft-Entscheidung. 7 gewählt statt 5, weil bei 5 zu wenig
-// Spielraum für unterschiedliche Wirtschafts-Strategien bleibt (Zinsen/Steuern-Tech, siehe unten,
-// profitiert zusätzlich von einer soliden Gold-Basis); 7 von 51 Feldern pro Spur lässt trotzdem
-// reichlich Platz für Türme (auch bei einer voll ausgebauten Verteidigung von 15-20+ Türmen).
-const MINE_MAX_COUNT = 7;
+// Minen-Anzahl-Limit (MINE_MAX_COUNT) und Minen-Ertragsformel (mineIncome()/mineIncomeTotal(),
+// inkl. MINE_INCOME_GROWTH_PER_TIER/MINE_INCOME_CAP_MULT) stehen jetzt in balance-shared.js -
+// seit dem Endlos-Modus-Port hat auch der Singleplayer Minen (siehe dort, Abschnitt "Minen"),
+// die Formel/der Deckel gilt jetzt für beide Modi identisch. Siehe docs/balancing.md.
 
 // Einheiten (werden zum Gegner geschickt)
+//
+// Tier-50-Apex-Fähigkeiten (Nachtrag): eine voll ausgebaute (Tier 50 = UNIT_MAX_TIER) Einheit
+// bekommt zusätzlich zur normalen HP-Skalierung (unitHpMult(), unten) eine einmalige, feste
+// Sonderfähigkeit - ein spürbarer "es hat sich gelohnt, komplett auszubauen"-Moment am Ende der
+// ohnehin schon sehr teuren Kosten-Kurve (UNIT_COST_GROWTH_PER_TIER, ungedeckelt). Umsetzung jeweils
+// direkt an der betroffenen Spielmechanik (Slow-Anwendung in moveUnits(), Flächenschaden-Anwendung
+// in moveProjectiles(), Ziel-Auswahl in fireTowers() - alle in index.html), Prüfung überall per
+// `u.tier >= UNIT_MAX_TIER` auf die gesendete Einheit (braucht das neue `key`-Feld auf dem
+// Einheiten-Objekt, siehe hostSendUnit()). Details/Begründung je Einheit in docs/balancing.md,
+// Abschnitt "Tier-50 Apex-Fähigkeiten".
+//  - sprinter: ab Tier 50 immun gegen Flächenschaden (Kanonen-Splash trifft ihn nicht mehr).
+//  - guard:    ab Tier 50 Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP pro Sekunde.
+//  - brecher:  ab Tier 50 zusätzlich immun gegen Slow (war bisher nur Fliegenden vorbehalten).
+//  - icecube:  ab Tier 50 nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
+//              komplett bei der Zielsuche (siehe TOWER_TYPES.tesla-Kommentar oben).
 const UNIT_TYPES = {
   sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 8 },
   guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 10 },
@@ -35,6 +73,7 @@ const UNIT_TYPES = {
   icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 11, flying: true, incomeBoostRate: 0.05 },
   titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
 };
+const GUARD_APEX_HEAL_PCT_PER_SEC = 0.80;
 
 // Einheiten-Upgrades: jetzt 50 Stufen (war 10, davor 3), damit Einheiten mit den (ebenfalls auf 50
 // Stufen gestreckten, siehe balance-shared.js) Türmen mithalten und sie am Ende übertreffen können —
@@ -119,19 +158,6 @@ function techPointBuyCost(n) {
   for (let i = 2; i < n; i++) { const c = a + b; a = b; b = c; }
   return 1000 * b;
 }
-
-// Minen teilen sich die Tier-Stufen (0-50) und die Upgrade-Kosten (tierUpgradeCost() aus
-// balance-shared.js) mit Türmen, aber Ertrag statt Schaden wächst pro Tier. War früher mit
-// TOWER_MAX_TIER=10 unbegrenzt (x1.5/Tier, Tier10 ≈ x57.7 ≈ 346 Gold/s) - bei jetzt 50 Tiers
-// UNGEDECKELT wäre das bei Tier50 ≈ x6.4×10^8 (absurd). Deshalb jetzt gedeckelt und die
-// Wachstumsrate gesenkt (x1.09/Tier statt x1.5/Tier), sodass der Deckel (×60 ≈ 360 Gold/s, minimal
-// über dem alten Tier10-Wert) grob erst nahe Tier 50 erreicht wird statt schon nahe Tier 10 -
-// gleiches Prinzip wie beim Turm-Schadensdeckel weiter oben: die alte Endstärke bleibt ungefähr
-// erhalten, verteilt sich aber jetzt über den vollen neuen Tier-Bereich statt nur die ersten 10 Stufen.
-const MINE_INCOME_GROWTH_PER_TIER = 1.09;
-const MINE_INCOME_CAP_MULT = 60;
-function mineIncome(t) { return 6 * Math.min(Math.pow(MINE_INCOME_GROWTH_PER_TIER, t.tier), MINE_INCOME_CAP_MULT); }
-function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
 
 function unitHpMult(tier) { return Math.min(Math.pow(UNIT_HP_GROWTH_PER_TIER, tier), UNIT_HP_CAP_MULT); }
 function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * unitHpMult(tier); }

@@ -37,6 +37,28 @@ function effectiveFireRate(t) { const m = Math.min(1 + AS_GROWTH_PER_TIER * t.ti
 function effectiveRange(t) { const m = Math.min(Math.pow(RANGE_GROWTH_PER_TIER, t.tier), RANGE_CAP_MULT); return t.baseRange * m; }
 function effectiveSplash(t) { if (!t.baseSplash) return 0; const m = Math.min(Math.pow(RADIUS_GROWTH_PER_TIER, t.tier), RADIUS_CAP_MULT); return t.baseSplash * m; }
 
+// ── Minen: gilt jetzt für beide Modi (Multiplayer schon länger, Endlos-Modus seit dem Feature-Port,
+// siehe docs/balancing.md, Abschnitte "Wirtschaft" und "Endlos-Modus: Multiplayer-Feature-Port") ──
+// Minen teilen sich die Tier-Stufen (0-50) und die Upgrade-Kosten (tierUpgradeCost() oben) mit
+// Türmen, aber Ertrag statt Schaden wächst pro Tier. Wachstum gedeckelt (×60 ≈ 360 Gold/s bei
+// Tier50), sonst würde das bei 50 Stufen absurd explodieren (gleiches Prinzip wie beim
+// Turm-Schadensdeckel oben - siehe docs/balancing.md für die volle Herleitung).
+const MINE_INCOME_GROWTH_PER_TIER = 1.09;
+const MINE_INCOME_CAP_MULT = 60;
+function mineIncome(t) { return 6 * Math.min(Math.pow(MINE_INCOME_GROWTH_PER_TIER, t.tier), MINE_INCOME_CAP_MULT); }
+function mineIncomeTotal(structs) { return structs.filter(s => s.type === 'mine').reduce((s, m) => s + mineIncome(m), 0); }
+
+// Minen-Anzahl-Limit: 7 pro Spieler/Partie. Ohne Limit ist bei 50 Tier-Stufen sonst eine "je mehr
+// Minen, desto besser"-Strategie ohne Gegenwert möglich - Minen-Ertrag ist rein additiv und passiv,
+// kostet anders als Türme keine laufende Aufmerksamkeit/Zielauswahl. Ein Limit erzwingt eine echte
+// Baufeld-vs-Wirtschaft-Entscheidung, besonders jetzt wo Zinsen-/Steuern-Tech (Multiplayer) bzw.
+// Zinsen-Tech (Endlos-Modus) zusätzlich mit dem Goldbestand skalieren - ohne Deckel würde das einen
+// sich selbst verstärkenden Wirtschafts-Schneeball erzeugen. Derselbe Wert (7) gilt bewusst für
+// beide Modi: im Multiplayer hergeleitet aus der 51-Zellen-Lane (siehe docs/balancing.md), im
+// Endlos-Modus trotz des deutlich größeren Baufelds (18×12) unverändert übernommen, weil hier nicht
+// die Feldgröße, sondern die Wirtschafts-Schneeball-Begrenzung der eigentliche Grund ist.
+const MINE_MAX_COUNT = 7;
+
 // ── Level-Optik: gilt für Türme (beide Modi) und gesendete Einheiten (Multiplayer) ──────
 // Farbe wird pro Tier etwas dunkler (Boden bei 55% Helligkeit, damit sie auf dem dunklen
 // Hintergrund erkennbar bleibt). Ab Level 5 ein Stern in der Mitte, alle weiteren 5 Level einer mehr.
