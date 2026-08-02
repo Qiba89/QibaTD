@@ -181,6 +181,52 @@ const SP_BOOSTER_FIRERATE_BUFF_CAP = 0.35;
 function boosterDamageBuff(tier) { return Math.min(SP_BOOSTER_DAMAGE_BUFF_BASE + SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_DAMAGE_BUFF_CAP); }
 function boosterFireRateBuff(tier) { return Math.min(SP_BOOSTER_FIRERATE_BUFF_BASE + SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_FIRERATE_BUFF_CAP); }
 
+// ── Turm-Upgrades geben jetzt NUR NOCH Schaden (Nachtrag, Balance-Fix, NUR Endlos-Modus) ─────────
+// Anfrage: "die damage skalierung der türme ist zu gering. man zahlt 116 für das erste upgrade um
+// einen dmg boost zu bekommen der weit unter einem einzel turm für 50 gold ist (bei dem arrow). Das
+// ist nicht balanced. man sollte dafür 120% damage+ bekommen vom base damage. tower upgrades sollen
+// auch kein speed und reichweiten upgrade mehr geben. das kommt jetzt über den boost tower."
+//
+// Scope-Entscheidung: NUR Endlos-Modus. Der Booster-Turm, der laut Anfrage jetzt die Feuerraten-/
+// Reichweiten-Steigerung übernehmen soll ("das kommt jetzt über den boost tower"), existiert
+// ausschließlich hier (siehe SP_TOWER_TYPES.booster oben) - im Multiplayer gäbe es sonst gar keine
+// Möglichkeit mehr, Feuerrate oder Reichweite über Turm-Upgrades zu steigern. balance-shared.js
+// (effectiveDamage/effectiveFireRate/effectiveRange, weiterhin unverändert von Multiplayer-Türmen
+// direkt genutzt) und balance-multiplayer.js bleiben deshalb komplett unangetastet.
+//
+// Gilt NUR für kämpfende Türme (`kind !== 'aura'`, siehe SP_TOWER_TYPES): Frost/Booster haben keinen
+// Schaden, und ihre `range` IST ihr Wirkungsradius (nicht "Angriffsreichweite") - die bleibt
+// weiterhin über effectiveRange() (Tier-Wachstum, balance-shared.js) skaliert, sonst wäre ein
+// Frost-/Booster-Upgrade komplett wirkungslos. Umgesetzt in spEffectiveRange()/spEffectiveFireRate()/
+// spEffectiveDamage() (index.html), jeweils mit einem `kind`-Zweig bzw. direktem Rückgriff auf
+// `t.baseRange`/`t.baseFireRate` statt der geteilten Tier-Wachstumsformel.
+//
+// Schadens-Wachstumsbudget: da Feuerrate nicht mehr mitwächst, wandert ihr alter Anteil am
+// Gesamt-DPS-Wachstum jetzt vollständig in den Schaden. Der alte, kombinierte DPS-Deckel
+// (Schaden-Deckel × Feuerrate-Deckel: Einzelziel 4.5×2.2=9.9, Fläche 2.6×2.2=5.72, siehe
+// balance-shared.js) wird hier zum NEUEN, alleinigen Schadens-Deckel - die Gesamt-Endstärke bei
+// Vollausbau bleibt dadurch unverändert ggü. vor diesem Nachtrag, nur früher/steiler erreicht (rein
+// durch Schaden statt Schaden+Feuerrate gemeinsam).
+//
+// Wachstumskurve: geometrisch von Stern 1 bis Stern 10, mit zwei fixen Randbedingungen -
+// SP_TOWER_DAMAGE_STAR1_MULT (Sprung bei Stern 1, ×2.2 = +120% über Basis-Schaden, wie exakt
+// angefragt) und dem oben hergeleiteten Deckel bei Stern 10. Wachstumsrate g löst
+// `STAR1_MULT × g^9 = Deckel` ⇒ `g = (Deckel / STAR1_MULT) ^ (1/9)`.
+const SP_TOWER_DAMAGE_STAR1_MULT = 2.20;
+const SP_TOWER_DAMAGE_CAP_MULT_SINGLE = DAMAGE_CAP_MULT_SINGLE * AS_CAP_MULT; // 4.5 × 2.2 = 9.9
+const SP_TOWER_DAMAGE_CAP_MULT_AOE = DAMAGE_CAP_MULT_AOE * AS_CAP_MULT;       // 2.6 × 2.2 = 5.72
+const SP_TOWER_DAMAGE_GROWTH_SINGLE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_SINGLE / SP_TOWER_DAMAGE_STAR1_MULT, 1 / 9);
+const SP_TOWER_DAMAGE_GROWTH_AOE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_AOE / SP_TOWER_DAMAGE_STAR1_MULT, 1 / 9);
+// Tier 0 (kein Upgrade): ×1 (Basis-Schaden unverändert). Ab Tier 1: STAR1_MULT × growth^(tier-1),
+// gedeckelt. AoE-Erkennung wie bei effectiveDamage() in balance-shared.js über `baseSplash > 0`.
+function spTowerDamageMult(t) {
+  if (t.tier <= 0) return 1;
+  const isAoe = t.baseSplash > 0;
+  const g = isAoe ? SP_TOWER_DAMAGE_GROWTH_AOE : SP_TOWER_DAMAGE_GROWTH_SINGLE;
+  const cap = isAoe ? SP_TOWER_DAMAGE_CAP_MULT_AOE : SP_TOWER_DAMAGE_CAP_MULT_SINGLE;
+  return Math.min(SP_TOWER_DAMAGE_STAR1_MULT * Math.pow(g, t.tier - 1), cap);
+}
+
 // ── Gegner-Schild & Tempo-Immunität ab Welle 25 (Nachtrag, auf Nutzeranfrage) ───────────────
 // Ab Welle 25 bekommt jeder gespawnte Gegner (alle Wellentypen, auch der Boss selbst) einen Schild,
 // der einen Treffer komplett absorbiert (unabhängig vom Schaden pro Treffer) bevor die HP überhaupt

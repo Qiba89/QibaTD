@@ -2149,7 +2149,15 @@ let gameSpeedMultiplier = 1;
 function hasSpTech(branch, tier) { return tech[branch] >= tier; }
 // Effektive Werte inkl. Tech-Boni, on top von den geteilten Tier-Skalierungs-Formeln
 // (effectiveRange/effectiveDamage/effectiveFireRate aus balance-shared.js).
-function spEffectiveRange(t) { return effectiveRange(t) * (hasSpTech('defense', 3) ? (1 + SP_RANGE_BOOST_TIER3) : 1); }
+// Nachtrag (Balance-Fix "Turm-Upgrades geben jetzt nur noch Schaden", siehe balance-singleplayer.js
+// Abschnitt bei spTowerDamageMult() für die volle Herleitung): Reichweite wächst bei kämpfenden
+// Türmen (`kind !== 'aura'`) nicht mehr mit dem Tier - nur noch Auren (Frost/Booster, deren `range`
+// ihr Wirkungsradius ist) nutzen weiterhin die geteilte effectiveRange()-Tier-Skalierung. Kämpfende
+// Türme bleiben bei ihrer Basis-Reichweite, nur noch per Verteidigung-Tech-Tier-3 (+10%) steigerbar.
+function spEffectiveRange(t) {
+  const base = SP_TOWER_TYPES[t.type].kind === 'aura' ? effectiveRange(t) : t.baseRange;
+  return base * (hasSpTech('defense', 3) ? (1 + SP_RANGE_BOOST_TIER3) : 1);
+}
 // Booster-Buff (Nachtrag, "Booster ... erhöht von umliegend türmen im Radius 1 Feld, schaden und
 // schnelligkeit"): summiert die Boni ALLER Booster-Türme in Reichweite von `t` - mehrere Booster
 // stapeln sich additiv, kein Multiplikator-Schneeball. Boostet nie andere Auren (auch nicht sich
@@ -2165,8 +2173,13 @@ function boosterBuffFor(t) {
   });
   return { dmg, fireRate };
 }
-function spEffectiveDamage(t) { return effectiveDamage(t) * (hasSpTech('attack', 3) ? (1 + SP_DAMAGE_BOOST_TIER3) : 1) * (1 + boosterBuffFor(t).dmg); }
-function spEffectiveFireRate(t) { return effectiveFireRate(t) / ((hasSpTech('attack', 2) ? (1 + SP_FIRERATE_BOOST_TIER2) : 1) * (1 + boosterBuffFor(t).fireRate)); }
+// Nachtrag (Balance-Fix "Turm-Upgrades geben jetzt nur noch Schaden"): Schaden nutzt jetzt die
+// eigene SP-Kurve `spTowerDamageMult()` (balance-singleplayer.js, +120% bei Stern 1, siehe dort für
+// die volle Herleitung) statt der geteilten `effectiveDamage()` - die bleibt unverändert für
+// Multiplayer-Türme in Benutzung. Feuerrate wächst nicht mehr mit dem Tier - kämpfende Türme bleiben
+// bei ihrer Basis-Feuerrate, nur noch per Angriffs-Tech-Tier-2 und Booster-Buff steigerbar.
+function spEffectiveDamage(t) { return t.baseDamage * spTowerDamageMult(t) * (hasSpTech('attack', 3) ? (1 + SP_DAMAGE_BOOST_TIER3) : 1) * (1 + boosterBuffFor(t).dmg); }
+function spEffectiveFireRate(t) { return t.baseFireRate / ((hasSpTech('attack', 2) ? (1 + SP_FIRERATE_BOOST_TIER2) : 1) * (1 + boosterBuffFor(t).fireRate)); }
 
 // Balancing-Werte (SP_TOWER_TYPES, Wellen-Skalierung, Wirtschaft, Tech-Tree) stecken
 // jetzt in js/balance-singleplayer.js (siehe <script>-Tag oben) statt
