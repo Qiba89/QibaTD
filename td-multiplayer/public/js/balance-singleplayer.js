@@ -208,23 +208,50 @@ function boosterFireRateBuff(tier) { return Math.min(SP_BOOSTER_FIRERATE_BUFF_BA
 // Vollausbau bleibt dadurch unverändert ggü. vor diesem Nachtrag, nur früher/steiler erreicht (rein
 // durch Schaden statt Schaden+Feuerrate gemeinsam).
 //
-// Wachstumskurve: geometrisch von Stern 1 bis Stern 10, mit zwei fixen Randbedingungen -
-// SP_TOWER_DAMAGE_STAR1_MULT (Sprung bei Stern 1, ×2.2 = +120% über Basis-Schaden, wie exakt
-// angefragt) und dem oben hergeleiteten Deckel bei Stern 10. Wachstumsrate g löst
-// `STAR1_MULT × g^9 = Deckel` ⇒ `g = (Deckel / STAR1_MULT) ^ (1/9)`.
-const SP_TOWER_DAMAGE_STAR1_MULT = 2.20;
+// Nachtrag (Nutzer-Feedback: "das zweite upgrade hat kaum damage boost gegeben ... die skalierung
+// sollte für alle stufen sein"): erste Version fixierte Stern 1 hart auf ×2.2 (+120%, wörtlich wie
+// ursprünglich angefragt) und verteilte den REST des Wachstums bis zum Deckel geometrisch auf die
+// verbleibenden 9 Stufen - das drückte die Wachstumsrate AB Stern 2 auf nur noch ~+18%/Stufe (der
+// Löwenanteil des Wachstumsbudgets war schon in den Stern-1-Sprung geflossen). Auf Rückfrage
+// entschieden: GLEICHMÄSSIGES Wachstum über alle 10 Stufen - jede Stufe multipliziert jetzt mit
+// derselben konstanten Rate (~+25,8 % Einzelziel / ~+19,1 % Fläche pro Stufe), die exakt bei Stern 10
+// den Deckel erreicht (`g = Deckel ^ (1/10)`). Kehrseite (dem Nutzer bei der Rückfrage explizit
+// genannt und bestätigt): Stern 1 liefert dadurch nur noch ~+26 % statt der ursprünglich angefragten
+// +120 % - dafür ist jede der 10 Stufen jetzt spürbar und gleich gewichtig, keine mehr "fühlt sich
+// nach nichts an". Strukturell wieder dieselbe Formel-Form wie effectiveDamage() in
+// balance-shared.js (`Basis × min(Rate^Tier, Deckel)`), nur mit eigenem, SP-lokalem Deckel/Rate.
 const SP_TOWER_DAMAGE_CAP_MULT_SINGLE = DAMAGE_CAP_MULT_SINGLE * AS_CAP_MULT; // 4.5 × 2.2 = 9.9
 const SP_TOWER_DAMAGE_CAP_MULT_AOE = DAMAGE_CAP_MULT_AOE * AS_CAP_MULT;       // 2.6 × 2.2 = 5.72
-const SP_TOWER_DAMAGE_GROWTH_SINGLE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_SINGLE / SP_TOWER_DAMAGE_STAR1_MULT, 1 / 9);
-const SP_TOWER_DAMAGE_GROWTH_AOE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_AOE / SP_TOWER_DAMAGE_STAR1_MULT, 1 / 9);
-// Tier 0 (kein Upgrade): ×1 (Basis-Schaden unverändert). Ab Tier 1: STAR1_MULT × growth^(tier-1),
-// gedeckelt. AoE-Erkennung wie bei effectiveDamage() in balance-shared.js über `baseSplash > 0`.
+const SP_TOWER_DAMAGE_GROWTH_SINGLE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_SINGLE, 1 / 10); // ≈ ×1.2577/Stufe
+const SP_TOWER_DAMAGE_GROWTH_AOE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_AOE, 1 / 10);       // ≈ ×1.1905/Stufe
+// AoE-Erkennung wie bei effectiveDamage() in balance-shared.js über `baseSplash > 0`.
 function spTowerDamageMult(t) {
-  if (t.tier <= 0) return 1;
   const isAoe = t.baseSplash > 0;
   const g = isAoe ? SP_TOWER_DAMAGE_GROWTH_AOE : SP_TOWER_DAMAGE_GROWTH_SINGLE;
   const cap = isAoe ? SP_TOWER_DAMAGE_CAP_MULT_AOE : SP_TOWER_DAMAGE_CAP_MULT_SINGLE;
-  return Math.min(SP_TOWER_DAMAGE_STAR1_MULT * Math.pow(g, t.tier - 1), cap);
+  return Math.min(Math.pow(g, t.tier), cap);
+}
+
+// ── Turm-Upgrade-Kosten proportional zur Turm-Grundkosten (Nachtrag, NUR Endlos-Modus) ───────────
+// Anfrage: "alles upgrades kosten 116. für den pfeilturm passt das gut, aber für die anderen türme
+// nicht, kannst du bitte die kosten skalierung auf basis der grundkosten für alle türme anpassen.
+// nimm dafür die verhältnisse vom pfeilturm und übertrag dies auf die anderen türm. ein kanonenturm
+// stufe 2 müsste dann 232 kosten zum beispiel." Grund: die geteilte tierUpgradeCost() (unten in
+// balance-shared.js) war schon immer komplett turmtyp-unabhängig - jeder Turm zahlte für seinen
+// ersten Stern dieselben 116 Gold, egal ob er 50 Gold (Pfeilturm) oder 250 Gold (Titan) zum Bauen
+// kostet. Das fühlte sich für den Pfeilturm (Referenz-Kosten der bisherigen Kurve, siehe unten)
+// richtig an, aber für teurere Türme im Verhältnis zu billig.
+//
+// Beispielrechnung, die der Nutzer selbst vorgegeben hat: Kanone kostet 100 Gold (Pfeilturm: 50,
+// Verhältnis ×2) - "Kanonenturm Stufe 2" (= erster Upgrade-Klick, "Stufe 1" ist dabei der gebaute
+// Turm selbst) soll 232 Gold kosten = Pfeilturm-Stufe-2-Kosten (116) × 2. Also: jeder Stern-Kosten-
+// Betrag der geteilten tierUpgradeCost()-Kurve wird mit dem Verhältnis (eigene Grundkosten ÷
+// Pfeilturm-Grundkosten) skaliert - der Pfeilturm selbst bleibt dadurch exakt unverändert (Verhältnis
+// ×1). Die geteilte tierUpgradeCost() bleibt UNVERÄNDERT (weiterhin turmtyp-unabhängig, von
+// Multiplayer-Türmen/-Minen direkt genutzt) - dies ist nur ein SP-lokaler Multiplikator obendrauf.
+function spTierUpgradeCost(type, nextTier) {
+  const ratio = SP_TOWER_TYPES[type].cost / SP_TOWER_TYPES.arrow.cost;
+  return Math.round(tierUpgradeCost(nextTier) * ratio);
 }
 
 // ── Gegner-Schild & Tempo-Immunität ab Welle 25 (Nachtrag, auf Nutzeranfrage) ───────────────

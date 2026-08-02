@@ -2281,7 +2281,7 @@ function upgradeAllOfType(buildType) {
   const candidates = towers.filter(t => t.type === buildType && t.tier < TOWER_MAX_TIER).sort((a, b) => a.tier - b.tier);
   let upgraded = 0;
   for (const t of candidates) {
-    const cost = tierUpgradeCost(t.tier + 1);
+    const cost = spTierUpgradeCost(t.type, t.tier + 1);
     if (gold < cost) break;
     gold -= cost;
     t.tier++;
@@ -2928,7 +2928,7 @@ function updateTowerInfoPanel() {
     upgradeBtn.textContent = 'Max. Tier erreicht';
     upgradeBtn.disabled = true;
   } else {
-    const cost = tierUpgradeCost(t.tier + 1);
+    const cost = spTierUpgradeCost(t.type, t.tier + 1);
     upgradeBtn.textContent = `Upgrade (${cost} Gold)`;
     upgradeBtn.disabled = gold < cost;
   }
@@ -2945,7 +2945,7 @@ function upgradeSelectedTower() {
   if (!selectedTower) return;
   const t = selectedTower;
   if (t.tier >= TOWER_MAX_TIER) return;
-  const cost = tierUpgradeCost(t.tier + 1);
+  const cost = spTierUpgradeCost(t.type, t.tier + 1);
   if (gold < cost) { setMessage('Nicht genug Gold für Upgrade.'); return; }
   gold -= cost;
   t.tier++;
