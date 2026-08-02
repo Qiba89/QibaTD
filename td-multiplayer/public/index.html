@@ -264,6 +264,22 @@
   /* Nachtrag (Skip-Button): Pause + "Nächste Welle sofort" nebeneinander statt je volle Breite. */
   #singleplayerMode .sp-wave-row { display: flex; gap: 6px; }
   #singleplayerMode .sp-wave-row .sp-action { flex: 1; margin-top: 6px; font-size: 12px; padding: 10px 4px; }
+  /* Nachtrag (Spielgeschwindigkeit): 1x/2x/5x/10x-Auswahl, gleiche optische Sprache wie die
+     Bau-Auswahl-Buttons (aktiver Zustand = accent2-Rahmen, siehe .sp-tower-btn.sp-selected). */
+  #singleplayerMode .sp-speed-row { display: flex; gap: 6px; margin-top: 6px; }
+  #singleplayerMode .sp-speed-row .sp-speed-btn {
+    flex: 1;
+    padding: 7px 4px;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: #232b34;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  #singleplayerMode .sp-speed-row .sp-speed-btn:hover { border-color: var(--accent); }
+  #singleplayerMode .sp-speed-row .sp-speed-btn.sp-speed-active { border-color: var(--accent2); background: #2a3542; color: var(--accent); }
   #singleplayerMode #spGameCanvas {
     background: var(--grass);
     border-radius: 10px;
@@ -592,12 +608,22 @@
     <!-- Nachtrag (Popup-Entfernung): "Welle starten ▶" entfällt - Welle 1 startet automatisch beim
          Betreten des Endlos-Modus (siehe startSingleplayerMode()) und jede weitere Welle genauso
          (advanceToNextWave(), automatisch getriggert). Manuelle Kontrolle: Pause, und (Nachtrag,
-         auf Nutzeranfrage) ein Skip-Button für die Pause zwischen zwei Wellen - für Spieler, die
-         schon stark genug sind und schneller vorankommen wollen, statt die volle 6s/9s-Wartezeit
-         abzuwarten. Nur während dieser Pause aktiv (siehe spSkipBtn-Handler unten). -->
+         auf Nutzeranfrage) ein Skip-Button, der die nächste Welle SOFORT dazu-ruft - auch während
+         die aktuelle Welle noch läuft (beide Wellen überlappen sich dann) - für Spieler, die schon
+         stark genug sind und schneller vorankommen wollen. Vor/während einer Boss-Welle gesperrt,
+         siehe spSkipBtn-Handler unten und docs/balancing.md, Abschnitt "Skip-Button". -->
     <div class="sp-wave-row">
       <button class="sp-action" id="spPauseBtn" title="Spiel pausieren">⏸ Pause</button>
-      <button class="sp-action" id="spSkipBtn" title="Nächste Welle sofort starten, ohne die Pause abzuwarten" disabled>⏭ Nächste Welle sofort</button>
+      <button class="sp-action" id="spSkipBtn" title="Nächste Welle sofort dazu-rufen (auch während die aktuelle noch läuft) - vor Boss-Wellen gesperrt" disabled>⏭ Nächste Welle sofort</button>
+    </div>
+    <!-- Nachtrag (Spielgeschwindigkeit, auf Nutzeranfrage): beschleunigt die komplette Simulation
+         gleichmäßig (Bewegung, Spawns, Timer) - nur Endlos-Modus, siehe loop()/gameSpeedMultiplier
+         unten und docs/balancing.md, Abschnitt "Spielgeschwindigkeit". -->
+    <div class="sp-speed-row" id="spSpeedRow">
+      <button class="sp-speed-btn sp-speed-active" data-speed="1" title="Normales Tempo">1×</button>
+      <button class="sp-speed-btn" data-speed="2" title="Doppeltes Tempo">2×</button>
+      <button class="sp-speed-btn" data-speed="5" title="5-faches Tempo">5×</button>
+      <button class="sp-speed-btn" data-speed="10" title="10-faches Tempo">10×</button>
     </div>
     <div id="spMessage">Turm auswählen, dann aufs Feld klicken zum Platzieren. Platzierte Türme anklicken zum Upgraden/Verkaufen. Doppelklick auf einen eigenen Turm upgradet ihn direkt. Wellen starten automatisch.</div>
   </div>
@@ -2093,6 +2119,11 @@ let lifeRegenAccum = 0;    // ms seit letzter Basis-Regeneration (Verteidigung T
 let lifeGenAccum = 0;      // ms seit letztem automatischem Extra-Leben (Angriff T1)
 let livesAtWaveStart = 20; // für die "Perfekte Welle"-Prüfung (Wirtschaft T4)
 let mineIncomeAccum = 0;   // ms seit letzter Minen-Auszahlung (Nachtrag: alle SP_MINE_PAYOUT_INTERVAL_MS statt kontinuierlich)
+// Nachtrag (Spielgeschwindigkeit, auf Nutzeranfrage): 1/2/5/10 - loop() ruft update(dt) entsprechend
+// oft pro echtem Animationsframe auf (siehe loop() unten), statt dt selbst zu skalieren, damit auch
+// die frame-basierte Gegner-/Projektil-Bewegung (siehe docs/balancing.md, "Bekannte Unterschiede
+// MP/SP") gleichmäßig mitbeschleunigt wird, nicht nur die dt-basierten Timer.
+let gameSpeedMultiplier = 1;
 
 function hasSpTech(branch, tier) { return tech[branch] >= tier; }
 // Effektive Werte inkl. Tech-Boni, on top von den geteilten Tier-Skalierungs-Formeln
@@ -2379,13 +2410,27 @@ function startWave() {
   updateSkipBtnState();
 }
 
+// skipBossGate() (Nachtrag): der Skip-Button darf eine Boss-Welle weder überspringen noch vorzeitig
+// herbeirufen - "das soll immer nur bis zur nächsten Boss-Runde möglich sein" (Nutzeranfrage). Prüft
+// sowohl die AKTUELLE Welle (Boss noch nicht besiegt -> nicht vorzeitig weiterspringen) als auch die
+// NÄCHSTE Welle (Boss steht unmittelbar bevor -> nicht in ihn hinein-skippen). Erst wenn advanceToNextWave()
+// die Wellenzahl über den Boss hinaus erhöht hat (nach der normalen 9s-Pause), ist er wieder erlaubt.
+function skipBossGate() {
+  return waveType(wave) === 'boss' || waveType(wave + 1) === 'boss';
+}
+
 // updateSkipBtnState() (Nachtrag): hält den "Nächste Welle sofort"-Button in Sync mit
-// autoNextPending/paused/gameOver - nur klickbar, während wirklich eine Pause zwischen zwei Wellen
-// läuft, sonst ausgegraut, damit klar ist, dass er gerade nichts tut.
+// waveActive/autoNextPending/paused/gameOver UND der Boss-Sperre - klickbar sowohl während der Pause
+// zwischen zwei Wellen als auch während eine Welle noch aktiv läuft (siehe callNextWaveEarly()
+// unten), außer unmittelbar vor/während einer Boss-Welle.
 function updateSkipBtnState() {
   const btn = document.getElementById('spSkipBtn');
   if (!btn) return;
-  btn.disabled = !(autoNextPending && !paused && !gameOver);
+  const bossBlocked = skipBossGate();
+  btn.disabled = !((autoNextPending || waveActive) && !paused && !gameOver) || bossBlocked;
+  btn.title = bossBlocked
+    ? 'Vor/während einer Boss-Welle gesperrt - die muss regulär gespielt werden.'
+    : 'Nächste Welle sofort dazu-rufen (auch während die aktuelle noch läuft) - vor Boss-Wellen gesperrt';
 }
 
 document.getElementById('spPauseBtn').addEventListener('click', () => {
@@ -2398,13 +2443,45 @@ document.getElementById('spPauseBtn').addEventListener('click', () => {
   updateSkipBtnState();
 });
 
-// Nachtrag (Skip-Button, auf Nutzeranfrage): nur während der Pause ZWISCHEN zwei Wellen aktiv
-// (autoNextPending) - überspringt die restliche 6s/9s-Wartezeit und startet die nächste Welle sofort,
-// für Spieler, die stark genug sind, um schneller voranzukommen. Kein Effekt während eine Welle noch
-// läuft (es gibt in dem Moment nichts zu überspringen) oder während Pause aktiv ist.
+// callNextWaveEarly() (Nachtrag): auf Nutzeranfrage - der Skip-Button soll die nächste Welle SOFORT
+// starten können, "obwohl die aktuelle noch nicht beendet ist". Anders als advanceToNextWave() (das
+// eine BEREITS abgeschlossene Welle voraussetzt und startWave() aufruft, was die spawnQueue komplett
+// ERSETZEN würde) wird hier die neue Welle nur an die bestehende spawnQueue ANGEHÄNGT - übrige
+// Spawns und schon aktive Gegner der alten Welle bleiben erhalten und laufen gemeinsam mit der neuen
+// Welle weiter (bewusste Überlappung, macht das Vorspulen riskanter/schwerer). Die Wellen-Abrechnung
+// (showWaveSummary()) feuert wie gewohnt erst, wenn spawnQueue UND enemies wieder leer sind - dann für
+// die inzwischen höhere `wave`-Nummer.
+function callNextWaveEarly() {
+  if (gameOver || paused || skipBossGate()) return;
+  wave++;
+  spawnQueue = spawnQueue.concat(makeWaveEnemies(wave));
+  waveActive = true;
+  pulseWaveBig();
+  const labels = { boss: ' 💀 BOSS-WELLE!', swarm: ' 🐝 Schwarm-Welle', relief: ' 😮‍💨 Verschnaufpause', flying: ' 🦅 Flieger-Welle (Kanone trifft sie nicht, Tesla ist der Spezialist)', normal: '' };
+  setMessage(`Welle ${wave} vorzeitig dazu-gerufen!${labels[waveType(wave)]}`);
+  updateStats();
+  updateSkipBtnState();
+}
+
+// Nachtrag (Skip-Button, überarbeitet auf Nutzeranfrage): jetzt in zwei Situationen aktiv - während
+// der Pause ZWISCHEN zwei Wellen (autoNextPending) überspringt er wie bisher nur die restliche 6s/9s-
+// Wartezeit (advanceToNextWave()); während eine Welle noch AKTIV läuft ruft er stattdessen die
+// nächste Welle sofort dazu (callNextWaveEarly()), ohne auf das Ende der aktuellen zu warten. Beides
+// gesperrt unmittelbar vor/während einer Boss-Welle (skipBossGate()).
 document.getElementById('spSkipBtn').addEventListener('click', () => {
-  if (gameOver || paused || !autoNextPending) return;
-  advanceToNextWave();
+  if (gameOver || paused || skipBossGate()) return;
+  if (autoNextPending) advanceToNextWave();
+  else if (waveActive) callNextWaveEarly();
+});
+
+// Nachtrag (Spielgeschwindigkeit, auf Nutzeranfrage): 1x/2x/5x/10x-Buttons setzen gameSpeedMultiplier
+// (siehe loop() weiter unten, wo update() entsprechend oft pro Frame aufgerufen wird) und markieren
+// sich gegenseitig als aktiv/inaktiv.
+document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    gameSpeedMultiplier = Number(btn.dataset.speed);
+    document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(b => b.classList.toggle('sp-speed-active', b === btn));
+  });
 });
 
 function damageEnemy(enemy, dmg) {
@@ -2692,7 +2769,15 @@ function draw() {
 function loop(ts) {
   const dt = ts - lastTime;
   lastTime = ts;
-  update(dt);
+  // Nachtrag (Spielgeschwindigkeit): update() wird gameSpeedMultiplier-mal mit demselben echten
+  // Frame-dt aufgerufen, statt dt selbst zu vervielfachen. Grund: Gegner-/Projektil-Bewegung ist in
+  // diesem Code frame-basiert (fester Pixel-Schritt pro update()-Aufruf, siehe docs/balancing.md,
+  // "Bekannte Unterschiede MP/SP"), reagiert also gar nicht auf einen größeren dt-Wert. Mehrfaches
+  // Aufrufen beschleunigt dadurch BEIDES gleichmäßig - die frame-basierte Bewegung UND die dt-
+  // basierten Timer (Spawns, Countdown, Regeneration, Minen-Auszahlung etc.) - um exakt denselben
+  // Faktor. Gezeichnet wird bewusst nur einmal pro echtem Frame (reine Performance, keine
+  // Balance-Auswirkung).
+  for (let i = 0; i < gameSpeedMultiplier && !gameOver; i++) update(dt);
   draw();
   // Gold-Anzeige jeden Frame aktualisieren, nicht nur bei diskreten Events — nötig, weil die
   // Zinsen-Tech (Wirtschaft T3) das Gold jetzt auch kontinuierlich zwischen den Events verändert.
@@ -2860,6 +2945,11 @@ function restartGame() {
   const pauseBtn = document.getElementById('spPauseBtn');
   pauseBtn.textContent = '⏸ Pause';
   pauseBtn.title = 'Spiel pausieren';
+  // Nachtrag (Spielgeschwindigkeit): nach einem Neustart wieder auf normales Tempo zurücksetzen,
+  // inkl. der Button-Optik - sonst würde ein Neustart mitten in einem 10x-Lauf "unsichtbar" auf
+  // hohem Tempo weiterlaufen.
+  gameSpeedMultiplier = 1;
+  document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(b => b.classList.toggle('sp-speed-active', b.dataset.speed === '1'));
   pulseWaveBig();
   updateStats();
   requestAnimationFrame(loop);
