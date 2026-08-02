@@ -11,9 +11,11 @@ const TOWER_TYPES = {
   // Tesla-Turm (Nachtrag): reiner Anti-Air-Spezialist - feuert NUR auf Fliegende (`airOnly`,
   // Gegenstück zu `groundOnly` bei der Kanone), dafür mit Kettenblitz (siehe `teslaChainJumps()`
   // unten und moveProjectiles() in index.html): der Schaden springt beim Einschlag von Ziel zu Ziel
-  // weiter, solange ein weiteres noch nicht getroffenes fliegendes Ziel innerhalb 1 Feld (siehe
-  // TESLA_CHAIN_RANGE in index.html) vom zuletzt getroffenen Ziel entfernt ist. Sprunganzahl wächst
-  // mit dem Turm-Tier: 1 (Basis) → 2 (ab Tier 10) → 3 (ab Tier 20) → 5 (ab Tier 30).
+  // weiter, zum jeweils NÄCHSTGELEGENEN noch nicht getroffenen fliegenden Ziel. Nachtrag (Balance-
+  // Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen ohne reichweiten
+  // beschränkung"): ursprünglich war der Sprung auf 1 Feld Abstand begrenzt (TESLA_CHAIN_RANGE), das
+  // wurde als zu schwach empfunden - jetzt springt die Kette uneingeschränkt weit. Sprunganzahl
+  // wächst weiterhin mit dem Turm-Tier: 1 (Basis) → 2 (ab Tier 10) → 3 (ab Tier 20) → 5 (ab Tier 30).
   // Kosten/Reichweite wie Kanone (wie angefragt: "Spezialist"). Schaden bewusst NICHT wie Kanone
   // (das wäre die AoE-Kurve, DAMAGE_CAP_MULT_AOE=2.6 in balance-shared.js) - Tesla trifft pro Ziel
   // EINZELN (kein Flächenradius, `splash` bleibt 0), nutzt also automatisch die höhere Einzelziel-

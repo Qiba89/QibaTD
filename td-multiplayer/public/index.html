@@ -148,6 +148,9 @@
   .pick-btn .info { flex: 1; }
   .pick-btn .name { font-weight: 600; }
   .pick-btn .cost { color: var(--accent); font-size: 11px; }
+  /* Nachtrag (auf Nutzeranfrage): Ziel-Icons (Boden/Luft) neben dem Turmnamen, siehe
+     towerTargetIconsHtml() in balance-shared.js - hilft, ohne Klick zu sehen, was ein Turm treffen kann. */
+  .target-icon { font-size: 11px; cursor: help; opacity: 0.85; }
   .build-row { display: flex; gap: 6px; align-items: stretch; margin-bottom: 8px; }
   .build-row .pick-btn { margin-bottom: 0; flex: 1; }
   .upgrade-all-btn {
@@ -655,8 +658,13 @@ const CELL = 40;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
-// Tesla-Kettenblitz-Sprungreichweite: "1 Feld" = eine CELL-Breite (siehe moveProjectiles() unten).
-const TESLA_CHAIN_RANGE = CELL;
+// Nachtrag (Balance-Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen
+// ohne reichweiten beschränkung"): der Kettenblitz sprang bisher nur zu fliegenden Zielen innerhalb
+// einer festen Sprungreichweite (früher hier als TESLA_CHAIN_RANGE definiert) - Tesla wurde dadurch
+// als zu schwach empfunden, sobald die Ziele nicht dicht genug beieinander standen. Springt jetzt
+// uneingeschränkt zum jeweils NÄCHSTGELEGENEN noch nicht getroffenen fliegenden Ziel, egal wie weit
+// entfernt (siehe moveProjectiles() unten) - die einzige verbleibende Grenze ist die Sprunganzahl
+// (teslaChainJumps()) und dass jedes Ziel nur einmal pro Schuss getroffen wird.
 
 function cellFromPixel(x, y) { return { c: Math.floor(x / CELL), r: Math.floor(y / CELL) }; }
 function cellCenter(c, r) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 }; }
@@ -862,8 +870,9 @@ function buildPalette() {
     btn.className = 'pick-btn'; btn.id = 'build-' + key;
     const sub = key === 'mine' ? '+6 Gold/s' : (key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette` : `${t.damage} Dmg`);
     const countLabel = key === 'mine' ? ` <span id="mine-count-label"></span>` : '';
+    const targetIcons = key === 'mine' ? '' : ` ${towerTargetIconsHtml(t)}`; // Minen feuern nie, keine Ziel-Icons nötig
     btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
-      <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold — ${sub}${countLabel}</div></div>`;
+      <div class="info"><div class="name">${t.name}${targetIcons}</div><div class="cost">${t.cost} Gold — ${sub}${countLabel}</div></div>`;
     btn.onclick = () => selectBuildType(key);
     row.appendChild(btn);
 
@@ -1337,9 +1346,10 @@ function moveProjectiles(projectiles, units, onUnitDeath) {
         });
       } else if (p.chainJumps) {
         // Tesla-Kettenblitz: erster Treffer beim Primärziel, danach springt der Schaden vom jeweils
-        // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel
-        // innerhalb TESLA_CHAIN_RANGE (1 Feld) weiter, bis kein weiteres Ziel mehr in Reichweite ist
-        // oder p.chainJumps Sprünge verbraucht sind. `hit` verhindert Mehrfachtreffer desselben Ziels.
+        // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel weiter -
+        // OHNE Reichweiten-Begrenzung (Nachtrag, auf Nutzeranfrage) -, bis entweder kein weiteres
+        // ungetroffenes fliegendes Ziel mehr existiert oder p.chainJumps Sprünge verbraucht sind.
+        // `hit` verhindert Mehrfachtreffer desselben Ziels.
         const hit = new Set();
         let current = p.target;
         damageUnit(current, p.damage, units, onUnitDeath);
@@ -1349,7 +1359,7 @@ function moveProjectiles(projectiles, units, onUnitDeath) {
           units.forEach(u => {
             if (hit.has(u) || !u.flying) return;
             const d = Math.abs(u.x - current.x); // gemeinsame Lane (feste y), x-Abstand reicht
-            if (d <= TESLA_CHAIN_RANGE && d < bestDist) { bestDist = d; next = u; }
+            if (d < bestDist) { bestDist = d; next = u; }
           });
           if (!next) break;
           hit.add(next);
@@ -1981,10 +1991,18 @@ function drawLane(ctx, structures, units, projectiles) {
     ctx.fillStyle = (r === PATH_ROW) ? '#3a3f47' : ((r + c) % 2 === 0 ? '#232a33' : '#212831');
     ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
   }
-  structures.forEach(t => {
-    if (t.type === 'mine') return;
-    ctx.beginPath(); ctx.fillStyle = 'rgba(255,255,255,0.04)'; ctx.arc(t.x, t.y, effectiveRange(t), 0, Math.PI * 2); ctx.fill();
-  });
+  // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
+  // bei vielen Türmen unübersichtlich. Jetzt nur noch für den aktuell ausgewählten Turm, dafür mit
+  // einem Rahmen, damit der Kreis trotz der dünnen Füllung gut erkennbar bleibt.
+  if (selectedStructure && selectedStructure.type !== 'mine') {
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.arc(selectedStructure.x, selectedStructure.y, effectiveRange(selectedStructure), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
   structures.forEach(t => {
     const radius = t.type === 'mine' ? 12 : 14;
     ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
@@ -2072,9 +2090,11 @@ const ctx = canvas.getContext('2d');
 const CELL = 40;
 const COLS = canvas.width / CELL;
 const ROWS = canvas.height / CELL;
-// Tesla-Kettenblitz-Sprungreichweite (Nachtrag): "1 Feld", analog zu TESLA_CHAIN_RANGE im
-// Multiplayer-Script, dort aber 1D-Lane-Distanz - hier echter 2D-Abstand auf dem (c,r)-Baufeld.
-const SP_TESLA_CHAIN_RANGE = CELL;
+// Nachtrag (Balance-Fix, auf Nutzeranfrage, analog zum Multiplayer-Pendant): der Kettenblitz sprang
+// bisher nur innerhalb einer festen Sprungreichweite zum nächsten fliegenden Ziel - jetzt uneinge-
+// schränkt zum jeweils nächstgelegenen noch nicht getroffenen fliegenden Ziel, egal wie weit entfernt
+// (siehe die Kettenblitz-Schleife weiter unten). Einzige verbleibende Grenze: Sprunganzahl
+// (`teslaChainJumps()`) und dass jedes Ziel nur einmal pro Schuss getroffen wird.
 
 // Path as grid waypoints (col, row) -> converted to pixel centers
 const pathCells = [
@@ -2118,7 +2138,6 @@ let shieldAccum = 0;       // ms seit letztem Schild-Ladezyklus (Verteidigung T2
 let lifeRegenAccum = 0;    // ms seit letzter Basis-Regeneration (Verteidigung T1)
 let lifeGenAccum = 0;      // ms seit letztem automatischem Extra-Leben (Angriff T1)
 let livesAtWaveStart = 20; // für die "Perfekte Welle"-Prüfung (Wirtschaft T4)
-let mineIncomeAccum = 0;   // ms seit letzter Minen-Auszahlung (Nachtrag: alle SP_MINE_PAYOUT_INTERVAL_MS statt kontinuierlich)
 // Nachtrag (Spielgeschwindigkeit, auf Nutzeranfrage): 1/2/5/10 - loop() ruft update(dt) entsprechend
 // oft pro echtem Animationsframe auf (siehe loop() unten), statt dt selbst zu skalieren, damit auch
 // die frame-basierte Gegner-/Projektil-Bewegung (siehe docs/balancing.md, "Bekannte Unterschiede
@@ -2180,9 +2199,11 @@ Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
   const btn = document.createElement('button');
   btn.className = 'sp-tower-btn';
   btn.id = 'btn-' + key;
-  const countLabel = key === 'mine' ? ` <span id="sp-mine-count-label"></span>` : '';
+  // Nachtrag (auf Nutzeranfrage): Ziel-Icons (Boden/Luft) neben dem Namen, siehe
+  // towerTargetIconsHtml() in balance-shared.js. Keine Mine mehr im Endlos-Modus (siehe Nachtrag
+  // "Mine entfernt" oben) - jeder verbleibende Turmtyp feuert, die Funktion ist also immer anwendbar.
   btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
-    <div class="info"><div class="name">${t.name}</div><div class="cost">${t.cost} Gold${countLabel}</div></div>`;
+    <div class="info"><div class="name">${t.name} ${towerTargetIconsHtml(t)}</div><div class="cost">${t.cost} Gold</div></div>`;
   btn.onclick = () => selectTower(key);
   row.appendChild(btn);
 
@@ -2199,7 +2220,6 @@ Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
 function selectTower(key) {
   const type = SP_TOWER_TYPES[key];
   if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) return;
-  if (key === 'mine' && towers.filter(t => t.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
   if (gold < type.cost) {
     setMessage(`Nicht genug Gold für ${type.name}.`);
     return;
@@ -2268,24 +2288,18 @@ canvas.addEventListener('click', (e) => {
       if (!isBuildableFootprint(c, r, footprint)) { setMessage(`Hier passt kein ${footprint}×${footprint}-Feld-Turm hin (Weg, Rand oder schon belegt).`); return; }
     } else if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
     if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button ist ohnehin versteckt
-    if (selectedTowerType === 'mine' && towers.filter(t => t.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; } // Sicherheitsnetz, Button ist ohnehin gesperrt
     if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
     gold -= type.cost;
-    const isMine = selectedTowerType === 'mine';
     towers.push({
       // (c,r) ist bei footprint>1 die obere linke Zelle des belegten Blocks (siehe towerCells()
       // oben); x/y liegen entsprechend in der Mitte des GESAMTEN Blocks, nicht nur einer Zelle.
       c, r, footprint, x: c*CELL + (footprint*CELL)/2, y: r*CELL + (footprint*CELL)/2,
       type: selectedTowerType, color: type.color, cost: type.cost, tier: 0, cooldown: 0,
       groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
-      // Minen bekommen bewusst keine Kampfwerte (wie newStructure() im Multiplayer) - sie feuern
-      // nie, effectiveDamage/-Range/-FireRate würden mit undefined-Basiswerten sonst NaN liefern.
-      ...(isMine ? {} : {
-        baseDamage: type.damage, baseFireRate: type.fireRate,
-        baseRange: type.range, baseSplash: type.splash || 0,
-        projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
-        priority: 'first',
-      }),
+      baseDamage: type.damage, baseFireRate: type.fireRate,
+      baseRange: type.range, baseSplash: type.splash || 0,
+      projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
+      priority: 'first',
     });
     deselectTower();
     updateStats();
@@ -2319,18 +2333,13 @@ function updateStats() {
     const key = btn.id.replace('btn-', '');
     btn.style.opacity = gold < SP_TOWER_TYPES[key].cost ? '0.5' : '1';
   });
-  // Türme mit Tech-Voraussetzung (Mine ab Wirtschaft T1, Titan-Turm ab Angriff T4) erst nach
-  // Freischaltung anzeigen.
+  // Türme mit Tech-Voraussetzung (aktuell nur Titan-Turm ab Angriff T4) erst nach Freischaltung
+  // anzeigen.
   Object.entries(SP_TOWER_TYPES).forEach(([key, t]) => {
     if (!t.requiresTech) return;
     const row = document.getElementById('sp-build-row-' + key);
     row.classList.toggle('sp-tower-locked', !hasSpTech(t.requiresTech.branch, t.requiresTech.tier));
   });
-  const mineCount = towers.filter(t => t.type === 'mine').length;
-  const mineLabel = document.getElementById('sp-mine-count-label');
-  if (mineLabel) mineLabel.textContent = `(${mineCount}/${MINE_MAX_COUNT})`;
-  const mineBtn = document.getElementById('btn-mine');
-  if (mineBtn) mineBtn.style.opacity = (mineCount >= MINE_MAX_COUNT || gold < SP_TOWER_TYPES.mine.cost) ? '0.5' : '1';
   document.getElementById('spSellAllBtn').style.opacity = towers.length ? '1' : '0.5';
   document.getElementById('spSellAllBtn').disabled = towers.length === 0;
   updateTowerInfoPanel();
@@ -2487,9 +2496,12 @@ document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(btn => {
 function damageEnemy(enemy, dmg) {
   enemy.hp -= dmg;
   if (enemy.hp <= 0) {
-    // Kill-Gold-Bonus (Wirtschaft T2, Port aus dem Multiplayer-Tech-Tree): +10% Gold pro Kill,
-    // separat von Wirtschaft T1 (das boostet stattdessen das Welleneinkommen, siehe showWaveSummary).
-    gold += enemy.reward * (hasSpTech('economy', 2) ? (1 + SP_KILL_GOLD_BOOST_TIER2) : 1);
+    // Kill-Gold-Boni: Wirtschaft T1 (Nachtrag/Balance-Fix, ersetzt die entfernte Mine) gibt einen
+    // pauschalen additiven Bonus pro Kill (SP_KILL_GOLD_FLAT_BONUS_TIER1), Wirtschaft T2 (Port aus
+    // dem Multiplayer-Tech-Tree) gibt zusätzlich +10% auf die Summe - dadurch wirkt T2 auch auf den
+    // T1-Bonus, nicht nur auf den Basis-Reward des Gegners.
+    const flatBonus = hasSpTech('economy', 1) ? SP_KILL_GOLD_FLAT_BONUS_TIER1 : 0;
+    gold += (enemy.reward + flatBonus) * (hasSpTech('economy', 2) ? (1 + SP_KILL_GOLD_BOOST_TIER2) : 1);
     enemies = enemies.filter(e => e !== enemy);
     updateStats();
   }
@@ -2590,25 +2602,8 @@ function update(dt) {
     }
   });
 
-  // Minen-Einkommen (Nachtrag/Balance-Fix): zahlt jetzt alle SP_MINE_PAYOUT_INTERVAL_MS (5s) den
-  // vollen 5-Sekunden-Ertrag auf einmal aus, statt wie vorher kontinuierlich pro Frame (siehe
-  // SP_MINE_PAYOUT_INTERVAL_MS in balance-singleplayer.js für die volle Begründung). +20%-
-  // Ertragsboost (Wirtschaft T1) ist an dieselbe Tech-Stufe geknüpft, die Minen überhaupt erst
-  // freischaltet - wenn Minen existieren, ist die Stufe also zwingend schon unlocked (mirrors
-  // mineIncomeMultFor() aus dem Multiplayer).
-  if (towers.some(t => t.type === 'mine')) {
-    mineIncomeAccum += dt;
-    if (mineIncomeAccum >= SP_MINE_PAYOUT_INTERVAL_MS) {
-      mineIncomeAccum -= SP_MINE_PAYOUT_INTERVAL_MS;
-      const mineIncomeMult = hasSpTech('economy', 1) ? (1 + SP_MINE_INCOME_BOOST_TIER1) : 1;
-      gold += mineIncomeTotal(towers) * mineIncomeMult * (SP_MINE_PAYOUT_INTERVAL_MS / 1000);
-      updateStats();
-    }
-  }
-
   // Towers fire (effective stats derived from each tower's own tier + Tech-Tree-Boni)
   towers.forEach(t => {
-    if (t.type === 'mine') return; // Minen haben keine Kampfwerte, feuern nicht
     t.cooldown -= dt;
     if (t.cooldown > 0) return;
     const effRange = spEffectiveRange(t);
@@ -2650,10 +2645,11 @@ function update(dt) {
         });
       } else if (p.chainJumps) {
         // Tesla-Kettenblitz: erster Treffer beim Primärziel, danach springt der Schaden vom jeweils
-        // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel
-        // innerhalb SP_TESLA_CHAIN_RANGE (1 Feld) weiter, bis kein Ziel mehr in Reichweite ist oder
-        // p.chainJumps Sprünge verbraucht sind. Port aus moveProjectiles() im Multiplayer-Script,
-        // hier mit echtem 2D-Abstand statt der MP-1D-Lane-Distanz (SP nutzt ein (c,r)-Baufeld).
+        // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel weiter -
+        // OHNE Reichweiten-Begrenzung (Nachtrag, auf Nutzeranfrage) -, bis entweder kein weiteres
+        // ungetroffenes fliegendes Ziel mehr existiert oder p.chainJumps Sprünge verbraucht sind.
+        // Port aus moveProjectiles() im Multiplayer-Script, hier mit echtem 2D-Abstand statt der
+        // MP-1D-Lane-Distanz (SP nutzt ein (c,r)-Baufeld).
         const hit = new Set();
         let current = p.target;
         damageEnemy(current, p.damage);
@@ -2663,7 +2659,7 @@ function update(dt) {
           enemies.forEach(e => {
             if (hit.has(e) || !e.flying) return;
             const d = Math.hypot(e.x - current.x, e.y - current.y);
-            if (d <= SP_TESLA_CHAIN_RANGE && d < bestDist) { bestDist = d; next = e; }
+            if (d < bestDist) { bestDist = d; next = e; }
           });
           if (!next) break;
           hit.add(next);
@@ -2699,19 +2695,23 @@ function draw() {
     ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
   });
 
-  // buildable hover preview (effective range per tower tier + Tech-Boni) — Minen haben keine Reichweite
-  towers.forEach(t => {
-    if (t.type === 'mine') return;
+  // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
+  // bei vielen Türmen unübersichtlich. Jetzt nur noch für den aktuell ausgewählten Turm, dafür mit
+  // einem Rahmen, damit der Kreis trotz der dünnen Füllung gut erkennbar bleibt.
+  if (selectedTower) {
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.arc(t.x, t.y, spEffectiveRange(t), 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.arc(selectedTower.x, selectedTower.y, spEffectiveRange(selectedTower), 0, Math.PI*2);
     ctx.fill();
-  });
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 
-  // towers (Minen etwas kleiner gezeichnet, wie im Multiplayer; Türme mit footprint>1, aktuell nur
-  // der Titan-Turm, entsprechend größer, damit das belegte 2×2-Baufeld optisch erkennbar bleibt)
+  // towers (Türme mit footprint>1, aktuell nur der Titan-Turm, entsprechend größer gezeichnet,
+  // damit das belegte 2×2-Baufeld optisch erkennbar bleibt)
   towers.forEach(t => {
-    const radius = t.type === 'mine' ? 12 : 14 + ((t.footprint || 1) - 1) * 10;
+    const radius = 14 + ((t.footprint || 1) - 1) * 10;
     if ((t.footprint || 1) > 1) {
       // Belegtes Baufeld sichtbar umranden, damit klar ist, welche Nachbarzellen dadurch blockiert sind.
       ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -2774,7 +2774,7 @@ function loop(ts) {
   // diesem Code frame-basiert (fester Pixel-Schritt pro update()-Aufruf, siehe docs/balancing.md,
   // "Bekannte Unterschiede MP/SP"), reagiert also gar nicht auf einen größeren dt-Wert. Mehrfaches
   // Aufrufen beschleunigt dadurch BEIDES gleichmäßig - die frame-basierte Bewegung UND die dt-
-  // basierten Timer (Spawns, Countdown, Regeneration, Minen-Auszahlung etc.) - um exakt denselben
+  // basierten Timer (Spawns, Countdown, Regeneration etc.) - um exakt denselben
   // Faktor. Gezeichnet wird bewusst nur einmal pro echtem Frame (reine Performance, keine
   // Balance-Auswirkung).
   for (let i = 0; i < gameSpeedMultiplier && !gameOver; i++) update(dt);
@@ -2799,30 +2799,19 @@ function updateTowerInfoPanel() {
   const panel = document.getElementById('spTowerInfo');
   if (!selectedTower) { panel.style.display = 'none'; return; }
   const t = selectedTower;
-  const isMine = t.type === 'mine';
   const maxed = t.tier >= TOWER_MAX_TIER;
   const footprintTag = (t.footprint || 1) > 1 ? `, ${t.footprint}×${t.footprint} Felder` : '';
   document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r}${footprintTag})`;
   document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
-  document.getElementById('spTiFireRateRow').style.display = isMine ? 'none' : 'flex';
-  document.getElementById('spTiRangeRow').style.display = isMine ? 'none' : 'flex';
-  document.getElementById('spTiPriorityRow').style.display = isMine ? 'none' : 'flex';
-  if (isMine) {
-    // Minen haben keine Kampfwerte (siehe Port aus dem Multiplayer-Info-Panel) - Schaden-Zeile
-    // wird stattdessen zur Ertrags-Anzeige umgewidmet.
-    const mult = hasSpTech('economy', 1) ? (1 + SP_MINE_INCOME_BOOST_TIER1) : 1;
-    document.getElementById('spTiDamageLabel').textContent = 'Einkommen';
-    // Nachtrag: Auszahlung erfolgt jetzt alle SP_MINE_PAYOUT_INTERVAL_MS (5s) statt kontinuierlich -
-    // die Gold/s-Anzeige bleibt die korrekte Durchschnittsrate, nur der Hinweis ist neu.
-    document.getElementById('spTiDamage').textContent = `+${(mineIncome(t) * mult).toFixed(1)} Gold/s (alle 5s ausgezahlt)`;
-  } else {
-    document.getElementById('spTiDamageLabel').textContent = 'Schaden';
-    document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
-    document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
-    document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
-    document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
-    document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
-  }
+  document.getElementById('spTiFireRateRow').style.display = 'flex';
+  document.getElementById('spTiRangeRow').style.display = 'flex';
+  document.getElementById('spTiPriorityRow').style.display = 'flex';
+  document.getElementById('spTiDamageLabel').textContent = 'Schaden';
+  document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
+  document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
+  document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
+  document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
+  document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
   const upgradeBtn = document.getElementById('spTiUpgradeBtn');
   if (maxed) {
     upgradeBtn.textContent = 'Max. Tier erreicht';
@@ -2865,8 +2854,8 @@ function sellSelectedTower() {
 }
 
 function showWaveSummary() {
-  // Wirtschaft T1 boostet jetzt den Minen-Ertrag (siehe update()), nicht mehr das Welleneinkommen -
-  // seit Minen auch im Endlos-Modus existieren, spiegelt das den Multiplayer strukturell näher.
+  // Wirtschaft T1 gibt seit dem Minen-Entfernungs-Nachtrag einen pauschalen Kill-Gold-Bonus
+  // (siehe damageEnemy()), betrifft das Welleneinkommen hier also nicht direkt.
   // T4 (Perfekte Welle: +50%, falls seit Wellenstart kein Leben verloren ging) - Port der
   // Multiplayer-Tech-Tree-Stufe 4, siehe balance-singleplayer.js und docs/balancing.md.
   let income = waveIncome(wave);
@@ -2934,7 +2923,7 @@ function restartGame() {
   gold = 220; lives = 20; maxLives = 20; wave = 1;
   towers = []; enemies = []; projectiles = [];
   selectedTowerType = null; waveActive = false; gameOver = false; paused = false;
-  autoNextPending = false; autoNextTimer = 0; waveSummaryText = ''; mineIncomeAccum = 0;
+  autoNextPending = false; autoNextTimer = 0; waveSummaryText = '';
   spawnQueue = []; spawnTimer = 0;
   selectedTower = null;
   techPoints = 0; techPointsBought = 0; tech = { defense: 0, economy: 0, attack: 0 };

@@ -23,14 +23,11 @@ const SP_TOWER_TYPES = {
   // `groundOnly`-Kanone, die sie nie treffen konnte). Kettenblitz-Sprünge über `teslaChainJumps()`
   // (aus balance-multiplayer.js, global verfügbar, keine Duplizierung nötig).
   tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 8, airOnly: true },
-  // Mine: seit dem Endlos-Modus-Feature-Port auch hier verfügbar, aber (anders als im Multiplayer,
-  // wo sie von Anfang an baubar ist) hinter Wirtschaft-Tech-Tier-1 verriegelt (`requiresTech`) -
-  // siehe SP_TECH_LABELS unten und docs/balancing.md für die Begründung. Kosten/Ertrag/Tier-
-  // Skalierung/Deckel/Anzahl-Limit identisch zum Multiplayer (mineIncome()/MINE_MAX_COUNT in
-  // balance-shared.js, gilt jetzt für beide Modi) - eine Mine im Endlos-Modus ist also exakt so
-  // stark wie im Multiplayer, keine separate Balance-Kurve nötig. Seit dem Wirtschafts-Nachtrag
-  // zahlt sie nicht mehr kontinuierlich, sondern alle SP_MINE_PAYOUT_INTERVAL_MS aus (siehe unten).
-  mine:   { name: 'Mine', cost: 100, color: '#ffd166', requiresTech: { branch: 'economy', tier: 1 } },
+  // Nachtrag (Balance-Fix, auf Nutzeranfrage "lass uns die mine entfernen"): die Mine (vormals hier
+  // als eigener, nicht-kämpfender Turmtyp hinter Wirtschaft-Tech-Tier-1 verriegelt, siehe Changelog)
+  // wurde komplett entfernt - kein Turmtyp im Endlos-Modus mehr. Wirtschaft-Tech-Tier-1 wurde dafür
+  // auf einen pauschalen Kill-Gold-Bonus umgewidmet, siehe SP_KILL_GOLD_FLAT_BONUS_TIER1 unten und
+  // SP_TECH_LABELS. Der Multiplayer behält seine Minen unverändert (dort nicht angefragt).
   // Titan-Turm: Endlos-Modus-Entsprechung des Multiplayer-Titans (Elite-Einheit, dort erst mit
   // Angriffs-Tech Tier 4 freigeschaltet). Da der Endlos-Modus keine sendbaren Einheiten kennt, wird
   // aus "Elite-Einheit freigeschaltet" hier "Elite-TURM freigeschaltet" - bleibt hinter derselben
@@ -92,17 +89,18 @@ function spawnIntervalMs(w) {
 // ── Tech-Tree (Endlos-Modus-Port des Multiplayer-Tech-Trees) ───────────────
 // Gleiche Struktur wie im Multiplayer (3 Zweige, je 4 Stufen, linear, 1 Punkt/Stufe), aber jede
 // PvP-spezifische Stufe wurde für den Endlos-Modus sinnvoll neu interpretiert, da es hier keinen
-// Gegner-Spieler und kein Einheiten-Senden gibt. Minen gibt es inzwischen auch im Endlos-Modus
-// (siehe SP_TOWER_TYPES.mine oben) - Wirtschaft Tier 1 schaltet sie frei, statt (wie ursprünglich
-// vor dem Minen-Nachtrag) nur einen pauschalen Welleneinkommens-Bonus zu geben - spiegelt damit den
-// Multiplayer strukturell näher (dort ist Tier 1 ja auch "der Minen-Punkt", nur als Ertrags-Boost
-// statt Freischaltung, weil Minen dort von Anfang an baubar sind). Details + Begründung pro Stufe
-// in docs/balancing.md, Abschnitt "Tech-Tree (Endlos-Modus)".
+// Gegner-Spieler und kein Einheiten-Senden gibt. Details + Begründung pro Stufe in docs/balancing.md,
+// Abschnitt "Tech-Tree (Endlos-Modus)".
+// Nachtrag (Balance-Fix, auf Nutzeranfrage "lass uns die mine entfernen und +1 gold auf einen mob
+// kill machen"): Wirtschaft Tier 1 schaltete bisher die (jetzt komplett entfernte) Mine frei -
+// widmet sich stattdessen um zu einem pauschalen, additiven Kill-Gold-Bonus (siehe
+// SP_KILL_GOLD_FLAT_BONUS_TIER1 unten, angewendet in damageEnemy() in index.html VOR dem
+// prozentualen Wirtschaft-T2-Bonus "Kill-Gold +10%", der dadurch auch auf diesen T1-Bonus wirkt).
 const SP_TECH_MAX_TIER = 4;
 const SP_TECH_BRANCHES = ['defense', 'economy', 'attack'];
 const SP_TECH_LABELS = {
   defense: { name: '🛡️ Verteidigung', tiers: ['Basis-Regeneration (+1 Leben alle 60s)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
-  economy: { name: '💰 Wirtschaft', tiers: ['Minen freigeschaltet (+20% Minen-Ertrag)', 'Kill-Gold +10%', 'Zinsen (zusätzlich +4% Wellenend-Verzinsung, einmalig pro Welle)', 'Perfekte Welle (+50% Welleneinkommen, falls kein Leben verloren)'] },
+  economy: { name: '💰 Wirtschaft', tiers: ['Kill-Gold +1 pro Kill', 'Kill-Gold +10%', 'Zinsen (zusätzlich +4% Wellenend-Verzinsung, einmalig pro Welle)', 'Perfekte Welle (+50% Welleneinkommen, falls kein Leben verloren)'] },
   attack:  { name: '⚔️ Angriff', tiers: ['Wachtrupp (+1 Leben alle 90s, automatisch)', 'Turm-Feuerrate +10%', 'Turm-Schaden +15%', 'Titan-Turm freigeschaltet (Elite-Turm, 2 Punkte)'] },
 };
 // Nachtrag (Balance): Angriff-Tier-4 (schaltet den als zu stark eingeschätzten Titan-Turm frei)
@@ -128,7 +126,9 @@ const SP_SHIELD_CHARGES = 3;                  // Verteidigung T2
 const SP_SHIELD_COOLDOWN_MS = 90000;          // Verteidigung T2
 const SP_RANGE_BOOST_TIER3 = 0.10;            // Verteidigung T3
 const SP_BOLLWERK_BONUS_LIVES = 5;            // Verteidigung T4
-const SP_MINE_INCOME_BOOST_TIER1 = 0.20;      // Wirtschaft T1 (identisch zur Multiplayer-Formel, mineIncomeMultFor())
+// Wirtschaft T1 (Nachtrag/Balance-Fix, ersetzt die entfernte Mine): pauschaler additiver
+// Kill-Gold-Bonus statt Minen-Freischaltung, siehe Kommentar bei SP_TECH_LABELS oben.
+const SP_KILL_GOLD_FLAT_BONUS_TIER1 = 1;      // Wirtschaft T1
 const SP_KILL_GOLD_BOOST_TIER2 = 0.10;        // Wirtschaft T2
 // Wirtschaft T3 "Zinsen" (Nachtrag/Balance-Fix): war ursprünglich +1%/s kontinuierlich, auf
 // Nutzeranfrage ("die 1% zinsen sind zu krass") umgebaut zu einer einmaligen Zusatzverzinsung bei
@@ -139,15 +139,6 @@ const SP_KILL_GOLD_BOOST_TIER2 = 0.10;        // Wirtschaft T2
 // einmalige Zusatzrate pro Wellenabschluss mit gemeinsamem Deckel dagegen schon.
 const SP_INTEREST_RATE_BONUS_TIER3_PER_WAVE = 0.04;
 const SP_PERFECT_WAVE_BONUS_TIER4 = 0.50;     // Wirtschaft T4
-// Minen-Auszahlungs-Intervall (Nachtrag/Balance-Fix): Minen zahlten bisher kontinuierlich pro Frame
-// aus (Bruchteile eines Golds, 60×/Sekunde) - das ließ sie zusammen mit der (jetzt ebenfalls
-// gefixten) Zinsen-Tech einen sich selbst verstärkenden Wirtschafts-Schneeball erzeugen, da der
-// laufend wachsende Goldbestand die nächste Zinsberechnung sofort mit erhöhte. Jetzt zahlen Minen
-// stattdessen alle 5 Sekunden den vollen 5-Sekunden-Ertrag auf einmal aus - gleicher Gesamt-Ertrag
-// pro Zeiteinheit (mineIncome() bleibt eine Gold/s-Rate, nur die Auszahlungs-Taktung ändert sich),
-// aber spürbar weniger "Treibstoff" für kontinuierliche Zinseszins-Effekte. Auf Nutzeranfrage
-// ("die minen sollten nur noch alle 5 sekunden gold produzieren").
-const SP_MINE_PAYOUT_INTERVAL_MS = 5000;
 const SP_LIFE_GEN_INTERVAL_MS = 90000;        // Angriff T1
 const SP_FIRERATE_BOOST_TIER2 = 0.10;         // Angriff T2
 const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
@@ -156,7 +147,7 @@ const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
 // Nach der Wellenzusammenfassung startet die nächste Welle jetzt von selbst statt auf einen
 // Button-Klick zu warten (Pause-Button in index.html als Gegenstück, um sich trotzdem Zeit zu
 // nehmen). 6s statt der ursprünglich vorgeschlagenen 5s: reicht, um die Gold-Abrechnung zu lesen
-// und noch 1-2 Klicks zu setzen (z.B. "Alle upgraden" oder eine Mine bauen), ohne die Partie ins
+// und noch 1-2 Klicks zu setzen (z.B. "Alle upgraden" oder einen Turm bauen), ohne die Partie ins
 // Stocken zu bringen. Vor Boss-Wellen bewusst länger (9s) - die Vorwarnung ("Nächste Welle ist eine
 // BOSS-Welle!") soll auch tatsächlich nutzbar sein, um gezielt nachzurüsten, nicht nur gelesen werden.
 const SP_AUTO_NEXT_WAVE_DELAY_MS = 6000;
