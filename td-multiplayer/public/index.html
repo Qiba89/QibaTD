@@ -1274,7 +1274,7 @@ function fireTowers(structures, units, projectiles, rangeMult) {
     units.forEach(u => {
       if (t.groundOnly && u.flying) return; // Boden-Verteidigung kann Fliegende nicht anvisieren
       if (t.airOnly && !u.flying) return; // Tesla feuert nur auf Fliegende (Gegenstück zu groundOnly)
-      // Apex-Fähigkeit Ice Cube ab Tier 50: nur noch vom Tesla-Turm anvisierbar, siehe
+      // Apex-Fähigkeit Ice Cube bei Vollausbau (UNIT_MAX_TIER): nur noch vom Tesla-Turm anvisierbar, siehe
       // UNIT_TYPES-Kommentar in balance-multiplayer.js.
       if (u.key === 'icecube' && u.tier >= UNIT_MAX_TIER && t.type !== 'tesla') return;
       const d = Math.hypot(u.x - t.x, u.y - t.y);
@@ -1300,11 +1300,11 @@ function moveUnits(units, onReachEnd) {
   for (let i = units.length - 1; i >= 0; i--) {
     const u = units[i];
     let speed = u.speed;
-    // Apex-Fähigkeit Brecher ab Tier 50: zusätzlich zu Fliegenden auch slow-immun (siehe
+    // Apex-Fähigkeit Brecher bei Vollausbau (UNIT_MAX_TIER): zusätzlich zu Fliegenden auch slow-immun (siehe
     // UNIT_TYPES-Kommentar in balance-multiplayer.js).
     const slowImmune = u.flying || (u.key === 'brecher' && u.tier >= UNIT_MAX_TIER);
     if (!slowImmune && now < u.slowUntil) speed *= 0.5;
-    // Apex-Fähigkeit Guard ab Tier 50: Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP
+    // Apex-Fähigkeit Guard bei Vollausbau (UNIT_MAX_TIER): Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP
     // pro Sekunde, kontinuierlich (nicht erst am Wellenende o.ä.) - macht einen voll ausgebauten
     // Guard fast unverwundbar gegenüber allem außer Burst-Schaden, das ist hier bewusst die
     // Apex-Belohnung dieser Einheit (siehe docs/balancing.md für die Einordnung).
@@ -1337,7 +1337,7 @@ function moveProjectiles(projectiles, units, onUnitDeath) {
       if (p.splash) {
         units.slice().forEach(u => {
           if (p.groundOnly && u.flying) return;
-          // Apex-Fähigkeit Sprinter ab Tier 50: immun gegen Flächenschaden. Kanonen-Schaden läuft in
+          // Apex-Fähigkeit Sprinter bei Vollausbau (UNIT_MAX_TIER): immun gegen Flächenschaden. Kanonen-Schaden läuft in
           // diesem Code ausschließlich über diesen Splash-Zweig (auch beim direkten Treffer, siehe
           // Radius-Check unten mit Distanz 0 zum Ziel selbst) - ein Tier-50-Sprinter wird von Kanonen
           // dadurch komplett ignoriert, wie angefragt ("kann kein Area-Damage mehr bekommen").
@@ -1946,10 +1946,12 @@ function updateUIFromState() {
     const sendCost = unitSendCost(key, tier);
     const reward = Math.floor(sendCost / 3);
     const tag = u.flying ? ' · Fliegend, immun ggü. Slow, von Boden-Verteidigung nicht angreifbar' : '';
-    // Tier-50-Apex-Fähigkeit als Vorschau anzeigen (schon vor dem Erreichen, damit erkennbar ist,
-    // worauf sich der volle Ausbau lohnt) - Wortlaut ändert sich, sobald Tier 50 erreicht ist.
+    // Apex-Fähigkeit (bei Vollausbau, UNIT_MAX_TIER) als Vorschau anzeigen (schon vor dem Erreichen,
+    // damit erkennbar ist, worauf sich der volle Ausbau lohnt) - Wortlaut ändert sich, sobald
+    // UNIT_MAX_TIER erreicht ist. Text dynamisch aus UNIT_MAX_TIER gebaut (Nachtrag Stern-
+    // Kompression: war vorher hart "Tier 50" - stimmte nicht mehr, seit UNIT_MAX_TIER 50 → 10).
     const apexInfo = APEX_INFO[key];
-    const apexTag = apexInfo ? (tier >= UNIT_MAX_TIER ? ` · ✨ Tier 50: ${apexInfo}` : ` · ab Tier 50: ${apexInfo}`) : '';
+    const apexTag = apexInfo ? (tier >= UNIT_MAX_TIER ? ` · ✨ Tier ${UNIT_MAX_TIER}: ${apexInfo}` : ` · ab Tier ${UNIT_MAX_TIER}: ${apexInfo}`) : '';
     document.getElementById('send-' + key).disabled = myGold < sendCost;
     document.getElementById('send-' + key + '-cost').textContent = sendCost;
     document.getElementById('send-' + key + '-sub').textContent = `${hp.toFixed(0)} HP, Gegner erhält +${reward} Gold${tag}${apexTag}`;

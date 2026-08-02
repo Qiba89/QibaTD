@@ -165,12 +165,18 @@ const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
 // ── Booster-Turm-Buff-Stärke (Nachtrag) ─────────────────────────────────────
 // Wächst mit dem Booster-eigenen Tier, gedeckelt (gleiches Prinzip wie bei den DAMAGE_CAP_MULT_*-
 // Deckeln in balance-shared.js - ein Support-Turm soll nicht unbegrenzt stark werden). Bei Tier 0:
-// +15% Schaden / +10% Feuerrate für Türme im Radius; bei Tier 50 gedeckelt bei +50% / +35%.
+// +15% Schaden / +10% Feuerrate für Türme im Radius; bei Vollausbau gedeckelt bei +50% / +35%.
+// Nachtrag (Stern-Kompression, balance-shared.js TOWER_MAX_TIER 50 → 10): der Booster ist ein Turm
+// und teilt sich damit TOWER_MAX_TIER, aber diese Buff-Formeln liegen hier lokal (nicht in den
+// geteilten GROWTH-Konstanten) - GROWTH_PER_TIER daher hier ebenfalls ×5 hochskaliert (gleiches
+// Prinzip wie bei AS_GROWTH_PER_TIER in balance-shared.js: linear statt exponentiell, also ×5 statt
+// ^5), damit derselbe Buff-Wert wie vorher beim jeweiligen Stern-Level erreicht wird. BASE und CAP
+// bleiben unverändert (absolute Balance-Endpunkte).
 const SP_BOOSTER_DAMAGE_BUFF_BASE = 0.15;
-const SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER = 0.01;
+const SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER = 0.01 * 5;
 const SP_BOOSTER_DAMAGE_BUFF_CAP = 0.50;
 const SP_BOOSTER_FIRERATE_BUFF_BASE = 0.10;
-const SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER = 0.008;
+const SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER = 0.008 * 5;
 const SP_BOOSTER_FIRERATE_BUFF_CAP = 0.35;
 function boosterDamageBuff(tier) { return Math.min(SP_BOOSTER_DAMAGE_BUFF_BASE + SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_DAMAGE_BUFF_CAP); }
 function boosterFireRateBuff(tier) { return Math.min(SP_BOOSTER_FIRERATE_BUFF_BASE + SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_FIRERATE_BUFF_CAP); }

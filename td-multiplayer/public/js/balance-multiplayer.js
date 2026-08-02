@@ -15,7 +15,8 @@ const TOWER_TYPES = {
   // Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen ohne reichweiten
   // beschränkung"): ursprünglich war der Sprung auf 1 Feld Abstand begrenzt (TESLA_CHAIN_RANGE), das
   // wurde als zu schwach empfunden - jetzt springt die Kette uneingeschränkt weit. Sprunganzahl
-  // wächst weiterhin mit dem Turm-Tier: 1 (Basis) → 2 (ab Tier 10) → 3 (ab Tier 20) → 5 (ab Tier 30).
+  // wächst weiterhin mit dem Turm-Tier: 1 (Basis) → 2 (ab Stern 2) → 3 (ab Stern 4) → 5 (ab Stern 6),
+  // siehe teslaChainJumps() unten (Schwellen seit der Stern-Kompression 2/4/6 statt vorher 10/20/30).
   // Kosten/Reichweite wie Kanone (wie angefragt: "Spezialist"). Schaden bewusst NICHT wie Kanone
   // (das wäre die AoE-Kurve, DAMAGE_CAP_MULT_AOE=2.6 in balance-shared.js) - Tesla trifft pro Ziel
   // EINZELN (kein Flächenradius, `splash` bleibt 0), nutzt also automatisch die höhere Einzelziel-
@@ -24,8 +25,9 @@ const TOWER_TYPES = {
   // Ziel bleibt Tesla dadurch klar schwächer als der Pfeilturm (Basis 9, gleiche Kurve, aber
   // schnellere Feuerrate 500ms statt 1100ms hier) - der eigentliche Wert kommt erst durch die Kette
   // gegen mehrere geclusterte Flieger (z.B. eine gezielte Ice-Cube-Schwarm-Taktik des Gegners) sowie
-  // dadurch, dass Tesla ab Tier 50 der EINZIGE Turm ist, der einen Tier-50-Ice-Cube noch anvisieren
-  // kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt "Tesla-Turm".
+  // dadurch, dass Tesla bei Vollausbau der EINZIGE Turm ist, der einen voll ausgebauten Ice Cube noch
+  // anvisieren kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt
+  // "Tesla-Turm".
   tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 500, airOnly: true },
   // Kosten 60 → 100: bei 60 war die Amortisationszeit (10s bis der Grund-Ertrag von 6 Gold/s die
   // Kosten wieder reingeholt hat) zu kurz - eine Mine war praktisch risikofrei sofort im Vorteil.
@@ -37,12 +39,15 @@ const TOWER_TYPES = {
 const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'mine'];
 
 // Tesla-Kettenblitz: Sprunganzahl nach Turm-Tier gestaffelt (siehe TOWER_TYPES.tesla-Kommentar
-// oben). Gedeckelt bei Tier 30 (nicht weiter bei Tier 50 gestiegen) - 5 gleichzeitig getroffene
-// Flieger sind schon ein sehr hoher Deckenwert, mehr würde bei dichten Schwärmen zu einseitig werden.
+// oben). Gedeckelt bei Tier 6 von 10 (nicht weiter bei Vollausbau gestiegen) - 5 gleichzeitig
+// getroffene Flieger sind schon ein sehr hoher Deckenwert, mehr würde bei dichten Schwärmen zu
+// einseitig werden. Schwellen 30/20/10 → 6/4/2 (Nachtrag Stern-Kompression, balance-shared.js):
+// das waren die alten Fein-Tier-Werte für Stern 6/4/2 (30/5=6, 20/5=4, 10/5=2) - identisch
+// gebliebene Sprungzahl-Stufen, jetzt einfach in der neuen 10er-Skala ausgedrückt.
 function teslaChainJumps(tier) {
-  if (tier >= 30) return 5;
-  if (tier >= 20) return 3;
-  if (tier >= 10) return 2;
+  if (tier >= 6) return 5;
+  if (tier >= 4) return 3;
+  if (tier >= 2) return 2;
   return 1;
 }
 const DEFAULT_INCOME_BOOST_RATE = 0.10;
@@ -54,19 +59,19 @@ const DEFAULT_INCOME_BOOST_RATE = 0.10;
 
 // Einheiten (werden zum Gegner geschickt)
 //
-// Tier-50-Apex-Fähigkeiten (Nachtrag): eine voll ausgebaute (Tier 50 = UNIT_MAX_TIER) Einheit
-// bekommt zusätzlich zur normalen HP-Skalierung (unitHpMult(), unten) eine einmalige, feste
-// Sonderfähigkeit - ein spürbarer "es hat sich gelohnt, komplett auszubauen"-Moment am Ende der
-// ohnehin schon sehr teuren Kosten-Kurve (UNIT_COST_GROWTH_PER_TIER, ungedeckelt). Umsetzung jeweils
-// direkt an der betroffenen Spielmechanik (Slow-Anwendung in moveUnits(), Flächenschaden-Anwendung
-// in moveProjectiles(), Ziel-Auswahl in fireTowers() - alle in index.html), Prüfung überall per
-// `u.tier >= UNIT_MAX_TIER` auf die gesendete Einheit (braucht das neue `key`-Feld auf dem
-// Einheiten-Objekt, siehe hostSendUnit()). Details/Begründung je Einheit in docs/balancing.md,
-// Abschnitt "Tier-50 Apex-Fähigkeiten".
-//  - sprinter: ab Tier 50 immun gegen Flächenschaden (Kanonen-Splash trifft ihn nicht mehr).
-//  - guard:    ab Tier 50 Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP pro Sekunde.
-//  - brecher:  ab Tier 50 zusätzlich immun gegen Slow (war bisher nur Fliegenden vorbehalten).
-//  - icecube:  ab Tier 50 nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
+// Apex-Fähigkeiten bei Vollausbau (Nachtrag): eine voll ausgebaute (Tier === UNIT_MAX_TIER, seit der
+// Stern-Kompression 10 statt vorher 50) Einheit bekommt zusätzlich zur normalen HP-Skalierung
+// (unitHpMult(), unten) eine einmalige, feste Sonderfähigkeit - ein spürbarer "es hat sich gelohnt,
+// komplett auszubauen"-Moment am Ende der ohnehin schon sehr teuren Kosten-Kurve
+// (UNIT_COST_GROWTH_PER_TIER, ungedeckelt). Umsetzung jeweils direkt an der betroffenen
+// Spielmechanik (Slow-Anwendung in moveUnits(), Flächenschaden-Anwendung in moveProjectiles(),
+// Ziel-Auswahl in fireTowers() - alle in index.html), Prüfung überall per `u.tier >= UNIT_MAX_TIER`
+// auf die gesendete Einheit (braucht das neue `key`-Feld auf dem Einheiten-Objekt, siehe
+// hostSendUnit()). Details/Begründung je Einheit in docs/balancing.md, Abschnitt "Apex-Fähigkeiten".
+//  - sprinter: bei Vollausbau immun gegen Flächenschaden (Kanonen-Splash trifft ihn nicht mehr).
+//  - guard:    bei Vollausbau Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP pro Sekunde.
+//  - brecher:  bei Vollausbau zusätzlich immun gegen Slow (war bisher nur Fliegenden vorbehalten).
+//  - icecube:  bei Vollausbau nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
 //              komplett bei der Zielsuche (siehe TOWER_TYPES.tesla-Kommentar oben).
 const UNIT_TYPES = {
   sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 8 },
@@ -77,23 +82,31 @@ const UNIT_TYPES = {
 };
 const GUARD_APEX_HEAL_PCT_PER_SEC = 0.80;
 
-// Einheiten-Upgrades: jetzt 50 Stufen (war 10, davor 3), damit Einheiten mit den (ebenfalls auf 50
-// Stufen gestreckten, siehe balance-shared.js) Türmen mithalten und sie am Ende übertreffen können —
-// sonst stagniert das Spiel, weil die Verteidigung strukturell immer gewinnt.
-// HP-Wachstum jetzt EXPLIZIT GEDECKELT (vorher unbegrenzt - bei 50 Tiers wäre x1.35/Tier auf
-// x3,5 Millionen explodiert). Deckel bei UNIT_HP_CAP_MULT=20 (praktisch identisch mit dem alten,
-// bei Tier10 uncapped erreichten Wert x20.1) - bewusst weiterhin ÜBER dem Turm-Schadens-Durchsatz-
-// Deckel (x9.9 = Schaden x4.5 * Feuerrate x2.2, unverändert), damit eine voll ausgebaute Einheit
-// strukturell mehr HP-Wachstum hat als der Turm Schaden aufbauen kann - ein Durchbruch bei genug
-// Investition bleibt möglich. Wachstumsrate gesenkt (x1.35 → x1.0617/Tier), damit der Deckel jetzt
-// bei Tier ≈50 statt ≈10 erreicht wird (gleiches Prinzip wie bei den Turm-Werten).
-// Kosten-Wachstum ebenfalls gesenkt (x1.6 → x1.09/Tier) - bleibt bewusst UNGEDECKELT (Kosten dürfen
-// am Ende richtig teuer werden, das limitiert sich über die schiere Größe von selbst), aber deutlich
-// sanfter gestreckt: derselbe Ziel-Endpunkt (~x69 Kostenmultiplikator, wie beim alten x1.6^9 zu
-// Tier10) wird jetzt bei Tier 50 statt Tier 10 erreicht.
-const UNIT_MAX_TIER = 50;
+// Einheiten-Upgrades: UNIT_MAX_TIER 50 → 10 (Nachtrag, Stern-Kompression - siehe TOWER_MAX_TIER-
+// Kommentar in balance-shared.js für die volle Begründung; auf Nutzerentscheidung "Türme + Einheiten"
+// gilt dieselbe Kompression auch hier). 1 Klick = 1 Stern statt 1 Klick = 1 von 50 Fein-Tiers; jeder
+// Klick liefert jetzt exakt die HP/Kosten, die vorher der ALTE Tier 5×T geliefert hätte (siehe
+// UNIT_HP_GROWTH_PER_TIER-Herleitung unten). Die Tier-50-Apex-Fähigkeiten (siehe UNIT_TYPES-Kommentar
+// oben) prüfen weiterhin relativ gegen UNIT_MAX_TIER (`u.tier >= UNIT_MAX_TIER`), lösen jetzt also
+// bei Stufe 10 (statt 50) aus - unverändert "erst beim komplett ausgebauten Vollausbau".
+// HP-Wachstum bleibt EXPLIZIT GEDECKELT bei UNIT_HP_CAP_MULT=20 (unverändert - absoluter
+// Balance-Endpunkt, siehe TOWER_MAX_TIER-Kommentar in balance-shared.js, gleiches Prinzip), bewusst
+// weiterhin ÜBER dem Turm-Schadens-Durchsatz-Deckel (x9.9 = Schaden x4.5 * Feuerrate x2.2,
+// unverändert), damit eine voll ausgebaute Einheit strukturell mehr HP-Wachstum hat als der Turm
+// Schaden aufbauen kann. Wachstumsrate (UNIT_HP_GROWTH_PER_TIER) per ^5 aus der alten Fein-Tier-Rate
+// hergeleitet (UNIT_HP_GROWTH_PER_OLD_TIER, unverändert 1.0617) - exakt dasselbe Herleitungs-Prinzip
+// wie bei den Turm-Wachstumsraten in balance-shared.js, damit HP bei kompaktem Tier T identisch zum
+// alten Wert bei Fein-Tier 5×T bleibt.
+// Kosten-Kurve (Nutzerentscheidung: "kumulierte Kosten gleich halten"): UNIT_UPGRADE_COST_BASE/
+// UNIT_COST_GROWTH_PER_TIER beschreiben weiterhin die alte, feine 50-Tier-Kostenkurve unverändert -
+// unitUpgradeCost() unten summiert für einen neuen Stern-Klick T jetzt die 5 alten Fein-Tier-Kosten
+// auf, die dieser Klick ersetzt. Kumulierte Gesamtkosten bis Vollausbau bleiben dadurch exakt
+// identisch zu vorher, nur gröbere Granularität (10 Zahlungen statt 50) - exakt dasselbe Prinzip wie
+// bei tierUpgradeCost() in balance-shared.js.
+const UNIT_MAX_TIER = 10;
 const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300 };
-const UNIT_HP_GROWTH_PER_TIER = 1.0617;
+const UNIT_HP_GROWTH_PER_OLD_TIER = 1.0617;
+const UNIT_HP_GROWTH_PER_TIER = Math.pow(UNIT_HP_GROWTH_PER_OLD_TIER, 5);
 const UNIT_HP_CAP_MULT = 20;
 const UNIT_COST_GROWTH_PER_TIER = 1.0902;
 
@@ -164,7 +177,14 @@ function techPointBuyCost(n) {
 function unitHpMult(tier) { return Math.min(Math.pow(UNIT_HP_GROWTH_PER_TIER, tier), UNIT_HP_CAP_MULT); }
 function unitEffectiveHp(key, tier) { return UNIT_TYPES[key].hp * unitHpMult(tier); }
 function unitSendCost(key, tier) { return Math.round(UNIT_TYPES[key].cost * unitHpMult(tier)); }
-function unitUpgradeCost(key, nextTier) { return Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, nextTier - 1)); }
+// Summiert die 5 alten Fein-Tier-Kosten auf, die der neue Stern-Klick `nextTier` (1..10) ersetzt -
+// siehe Kommentar bei UNIT_MAX_TIER oben ("kumulierte Kosten gleich halten"), exakt dasselbe Prinzip
+// wie tierUpgradeCost() in balance-shared.js.
+function unitUpgradeCost(key, nextTier) {
+  let sum = 0;
+  for (let k = (nextTier - 1) * 5 + 1; k <= nextTier * 5; k++) sum += Math.round(UNIT_UPGRADE_COST_BASE[key] * Math.pow(UNIT_COST_GROWTH_PER_TIER, k - 1));
+  return sum;
+}
 
 // ── KI-Gegner: 3 Schwierigkeitsgrade, ersetzt Spieler 2 wenn kein echter Mitspieler da ist ──
 // Die KI läuft komplett auf der Host-Seite (im selben Browser wie der menschliche Spieler) und
