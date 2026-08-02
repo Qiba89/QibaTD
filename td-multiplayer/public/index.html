@@ -2148,8 +2148,23 @@ function hasSpTech(branch, tier) { return tech[branch] >= tier; }
 // Effektive Werte inkl. Tech-Boni, on top von den geteilten Tier-Skalierungs-Formeln
 // (effectiveRange/effectiveDamage/effectiveFireRate aus balance-shared.js).
 function spEffectiveRange(t) { return effectiveRange(t) * (hasSpTech('defense', 3) ? (1 + SP_RANGE_BOOST_TIER3) : 1); }
-function spEffectiveDamage(t) { return effectiveDamage(t) * (hasSpTech('attack', 3) ? (1 + SP_DAMAGE_BOOST_TIER3) : 1); }
-function spEffectiveFireRate(t) { return effectiveFireRate(t) / (hasSpTech('attack', 2) ? (1 + SP_FIRERATE_BOOST_TIER2) : 1); }
+// Booster-Buff (Nachtrag, "Booster ... erhöht von umliegend türmen im Radius 1 Feld, schaden und
+// schnelligkeit"): summiert die Boni ALLER Booster-Türme in Reichweite von `t` - mehrere Booster
+// stapeln sich additiv, kein Multiplikator-Schneeball. Boostet nie andere Auren (auch nicht sich
+// selbst), nur kämpfende Türme (`kind !== 'aura'`), siehe SP_TOWER_TYPES.
+function boosterBuffFor(t) {
+  if (SP_TOWER_TYPES[t.type].kind === 'aura') return { dmg: 0, fireRate: 0 };
+  let dmg = 0, fireRate = 0;
+  towers.forEach(b => {
+    if (b.type !== 'booster' || b === t) return;
+    if (Math.hypot(b.x - t.x, b.y - t.y) > spEffectiveRange(b)) return;
+    dmg += boosterDamageBuff(b.tier);
+    fireRate += boosterFireRateBuff(b.tier);
+  });
+  return { dmg, fireRate };
+}
+function spEffectiveDamage(t) { return effectiveDamage(t) * (hasSpTech('attack', 3) ? (1 + SP_DAMAGE_BOOST_TIER3) : 1) * (1 + boosterBuffFor(t).dmg); }
+function spEffectiveFireRate(t) { return effectiveFireRate(t) / ((hasSpTech('attack', 2) ? (1 + SP_FIRERATE_BOOST_TIER2) : 1) * (1 + boosterBuffFor(t).fireRate)); }
 
 // Balancing-Werte (SP_TOWER_TYPES, Wellen-Skalierung, Wirtschaft, Tech-Tree) stecken
 // jetzt in js/balance-singleplayer.js (siehe <script>-Tag oben) statt
@@ -2290,16 +2305,24 @@ canvas.addEventListener('click', (e) => {
     if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button ist ohnehin versteckt
     if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
     gold -= type.cost;
+    // Nachtrag (Aura-Türme: Frost-Aura + Booster-Turm, `kind: 'aura''): bekommen keine Kampfwerte
+    // (baseDamage/baseFireRate/baseSplash/projSpeed) - sie feuern nie, effectiveDamage/-FireRate
+    // würden mit undefined-Basiswerten sonst NaN liefern. baseRange bleibt für BEIDE Turmarten
+    // erhalten, da er jetzt universell "Wirkungsradius" bedeutet (Angriffsreichweite bei kämpfenden
+    // Türmen, Aura-Radius bei Frost/Booster) und über dieselbe effectiveRange()-Tier-Skalierung wächst.
+    const isAura = type.kind === 'aura';
     towers.push({
       // (c,r) ist bei footprint>1 die obere linke Zelle des belegten Blocks (siehe towerCells()
       // oben); x/y liegen entsprechend in der Mitte des GESAMTEN Blocks, nicht nur einer Zelle.
       c, r, footprint, x: c*CELL + (footprint*CELL)/2, y: r*CELL + (footprint*CELL)/2,
       type: selectedTowerType, color: type.color, cost: type.cost, tier: 0, cooldown: 0,
       groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
-      baseDamage: type.damage, baseFireRate: type.fireRate,
-      baseRange: type.range, baseSplash: type.splash || 0,
-      projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
-      priority: 'first',
+      baseRange: type.range,
+      ...(isAura ? { slow: type.slow } : {
+        baseDamage: type.damage, baseFireRate: type.fireRate, baseSplash: type.splash || 0,
+        projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
+        priority: 'first',
+      }),
     });
     deselectTower();
     updateStats();
@@ -2346,10 +2369,19 @@ function updateStats() {
   updateSpTechUI();
 }
 
-function pushEnemy(list, hp, speed, radius, color, reward, isBoss, flying) {
+// Nachtrag (Gegner-Schild ab Welle 25, "fast"-Flag für die Frost-Aura-Immunität): pushEnemy() nimmt
+// jetzt ein Options-Objekt statt einer langen Positions-Parameterliste (war bei 8 Feldern schon an
+// der Grenze der Lesbarkeit) - `shieldHits` wird einmal pro Welle in makeWaveEnemies() berechnet und
+// hier an jeden Gegner der Welle durchgereicht, `maxShieldHits` bleibt zur Referenz erhalten (aktuell
+// nicht fürs Zeichnen gebraucht, da der Schild-Rahmen nur an/aus ist, aber für spätere Abstufungen
+// nützlich). `fast: true` markiert Schwarm-/Flieger-Gegner (siehe makeWaveEnemies()) als Ziel der
+// Frost-Aura-Immunität ab SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE.
+function pushEnemy(list, opts) {
+  const { hp, speed, radius, color, reward, isBoss = false, flying = false, fast = false, shieldHits = 0 } = opts;
   list.push({
     hp, maxHp: hp, speed, baseSpeed: speed, radius, color, reward,
-    isBoss: !!isBoss, flying: !!flying, wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
+    isBoss: !!isBoss, flying: !!flying, fast: !!fast, shieldHits, maxShieldHits: shieldHits,
+    wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
   });
 }
 
@@ -2359,43 +2391,49 @@ function makeWaveEnemies(w) {
   const speed = 1 + Math.min(w * 0.03, 1);
   const kg = killGoldBase(w);
   const list = [];
+  // Nachtrag (auf Nutzeranfrage "Ab runde 25 bekommen die gegner einen schild der einen Hit abhält
+  // ... ab runde 45 hält der schild 2 Hits aus"): einmal pro Welle berechnet, gilt für ALLE
+  // Gegnertypen dieser Welle gleichermaßen (auch den Boss selbst), siehe enemyShieldHitsForWave() in
+  // balance-singleplayer.js.
+  const shieldHits = enemyShieldHitsForWave(w);
 
   if (type === 'swarm') {
     const cnt = Math.round(baseCount(w) * SWARM_COUNT_MULT);
     const hp = hp0 * SWARM_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, hp, speed * 1.15, 8, '#ffd166', Math.round(kg * SWARM_HP_MULT));
+      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits });
     }
   } else if (type === 'relief') {
     const cnt = baseCount(w);
     const hp = hp0 * POST_BOSS_RELIEF_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, hp, speed, 10, '#7cd992', Math.round(kg));
+      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits });
     }
   } else if (type === 'boss') {
     const cnt = Math.round(baseCount(w) * 0.7);
     const escortHp = hp0 * BOSS_ESCORT_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, escortHp, speed, 10, '#ff5e5e', Math.round(kg * BOSS_ESCORT_HP_MULT));
+      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits });
     }
     // Boss spawns last -> arrives at the end of the wave
     const bHp = Math.round(hp0 * bossMult(w));
-    pushEnemy(list, bHp, speed * 0.4, 24, '#e63946', Math.round(kg * bossMult(w)), true);
+    pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits });
   } else if (type === 'flying') {
     // Flieger-Welle (Nachtrag): ab Welle 12, alle 10 Wellen (siehe waveType() in
-    // balance-singleplayer.js). Boden-Türme (Pfeil/Kanone/Frost/Titan) können diese Gegner nur zum
+    // balance-singleplayer.js). Boden-Türme (Pfeil/Kanone/Titan) können diese Gegner nur zum
     // Teil treffen - die Kanone (groundOnly) gar nicht, siehe SP_TOWER_TYPES - der Tesla-Turm
-    // (airOnly) ist der einzige, der NUR sie anvisiert. Etwas weniger HP, aber etwas schneller und
-    // mit Bonus-Belohnung als Ausgleich dafür, dass ein Teil der bestehenden Verteidigung sie nicht
-    // aufhalten kann. Gleiche Anzahl wie eine normale Welle (baseCount(w)).
+    // (airOnly) ist der einzige, der NUR sie anvisiert (die Frost-Aura wirkt auf Boden UND Luft,
+    // siehe Aura-Türme-Nachtrag). Etwas weniger HP, aber etwas schneller und mit Bonus-Belohnung
+    // als Ausgleich dafür, dass ein Teil der bestehenden Verteidigung sie nicht aufhalten kann.
+    // Gleiche Anzahl wie eine normale Welle (baseCount(w)).
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, hp0 * 0.8, speed * 1.1, 9, '#38bdf8', Math.round(kg * 1.1), false, true);
+      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits });
     }
   } else { // normal
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, hp0, speed, 10, '#ff5e5e', Math.round(kg));
+      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits });
     }
   }
 
@@ -2494,6 +2532,15 @@ document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(btn => {
 });
 
 function damageEnemy(enemy, dmg) {
+  // Gegner-Schild (Nachtrag, auf Nutzeranfrage "Ab runde 25 bekommen die gegner einen schild der
+  // einen Hit abhält ... ab runde 45 hält der schild 2 Hits aus"): absorbiert einen kompletten
+  // Treffer (unabhängig vom Schadenswert) BEVOR überhaupt HP abgezogen wird - jeder damageEnemy()-
+  // Aufruf zählt als ein Treffer, egal ob Direkttreffer, Flächenschaden oder ein einzelner
+  // Tesla-Kettensprung. Läuft einfach leer, sobald shieldHits auf 0 ist (normales Verhalten danach).
+  if (enemy.shieldHits > 0) {
+    enemy.shieldHits--;
+    return;
+  }
   enemy.hp -= dmg;
   if (enemy.hp <= 0) {
     // Kill-Gold-Boni: Wirtschaft T1 (Nachtrag/Balance-Fix, ersetzt die entfernte Mine) gibt einen
@@ -2602,8 +2649,30 @@ function update(dt) {
     }
   });
 
+  // Aura-Türme (Nachtrag: Frost-Aura + Booster-Turm, beide "kind: 'aura'" - siehe SP_TOWER_TYPES):
+  // wirken kontinuierlich auf alles im Radius, kein Cooldown, kein Ziel, kein Projektil. Die
+  // Booster-Buff-Seite braucht hier KEINE eigene Schleife - sie wird reaktiv in spEffectiveDamage()/
+  // spEffectiveFireRate() unten berechnet, sobald ein anderer Turm feuert. Die Frost-Aura dagegen
+  // muss aktiv pro Frame jeden Gegner im Radius erneut verlangsamen (kontinuierlicher Effekt statt
+  // einmaligem Projektil-Treffer).
+  towers.forEach(t => {
+    if (SP_TOWER_TYPES[t.type].auraTarget !== 'enemies') return; // aktuell nur Frost, generisch über auraTarget statt hartem Typ-Check
+    const auraRange = spEffectiveRange(t);
+    enemies.forEach(e => {
+      // "Schnelle" Gegner (Schwarm/Flieger, `fast: true`) sind ab Welle SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE
+      // komplett immun gegen die Frost-Aura (auf Nutzeranfrage).
+      if (e.fast && wave >= SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE) return;
+      if (Math.hypot(e.x - t.x, e.y - t.y) > auraRange) return;
+      // Kleiner Puffer (300ms) statt der alten, für Einzeltreffer gedachten slowDuration: reicht über
+      // mehrere Frames hinweg, damit die Verlangsamung bei durchgehendem Aura-Kontakt lückenlos bleibt,
+      // läuft aber innerhalb von 300ms nach Verlassen des Radius von selbst wieder ab.
+      e.slowUntil = performance.now() + 300;
+    });
+  });
+
   // Towers fire (effective stats derived from each tower's own tier + Tech-Tree-Boni)
   towers.forEach(t => {
+    if (SP_TOWER_TYPES[t.type].kind === 'aura') return; // Frost-Aura + Booster feuern nie, siehe oben
     t.cooldown -= dt;
     if (t.cooldown > 0) return;
     const effRange = spEffectiveRange(t);
@@ -2749,6 +2818,20 @@ function draw() {
       ctx.arc(e.x, e.y, e.radius + 3, 0, Math.PI*2);
       ctx.stroke();
     }
+    // Schild-Kennzeichnung (Nachtrag, auf Nutzeranfrage "zeig den schild als Blauen Rahmen, leicht
+    // leuchtend"): leicht leuchtender blauer Rahmen, solange shieldHits > 0 - liegt außerhalb des
+    // Flieger-Rings (falls beides zutrifft, bleiben beide Ringe einzeln erkennbar).
+    if (e.shieldHits > 0) {
+      ctx.save();
+      ctx.shadowColor = '#3b82f6';
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.strokeStyle = '#60a5fa';
+      ctx.lineWidth = 2.5;
+      ctx.arc(e.x, e.y, e.radius + (e.flying ? 6 : 3), 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
     // hp bar
     const w = e.radius*2;
     ctx.fillStyle = '#000';
@@ -2799,19 +2882,32 @@ function updateTowerInfoPanel() {
   const panel = document.getElementById('spTowerInfo');
   if (!selectedTower) { panel.style.display = 'none'; return; }
   const t = selectedTower;
+  const def = SP_TOWER_TYPES[t.type];
+  const isAura = def.kind === 'aura';
   const maxed = t.tier >= TOWER_MAX_TIER;
   const footprintTag = (t.footprint || 1) > 1 ? `, ${t.footprint}×${t.footprint} Felder` : '';
-  document.getElementById('spTiTitle').textContent = `${SP_TOWER_TYPES[t.type].name} (Feld ${t.c},${t.r}${footprintTag})`;
+  document.getElementById('spTiTitle').textContent = `${def.name} (Feld ${t.c},${t.r}${footprintTag})`;
   document.getElementById('spTiLevel').textContent = `${t.tier} / ${TOWER_MAX_TIER}`;
-  document.getElementById('spTiFireRateRow').style.display = 'flex';
+  // Nachtrag (Aura-Türme: Frost-Aura + Booster-Turm): keine Feuerrate/Ziel-Priorität - Auren feuern
+  // nie und wählen kein Einzelziel, sie wirken kontinuierlich auf alles im Radius. Reichweiten-Zeile
+  // bleibt für beide Turmarten (zeigt bei Auren den Wirkungsradius statt der Angriffsreichweite).
+  document.getElementById('spTiFireRateRow').style.display = isAura ? 'none' : 'flex';
   document.getElementById('spTiRangeRow').style.display = 'flex';
-  document.getElementById('spTiPriorityRow').style.display = 'flex';
-  document.getElementById('spTiDamageLabel').textContent = 'Schaden';
-  document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
-  document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
+  document.getElementById('spTiPriorityRow').style.display = isAura ? 'none' : 'flex';
+  if (isAura && t.type === 'frost') {
+    document.getElementById('spTiDamageLabel').textContent = 'Effekt';
+    document.getElementById('spTiDamage').textContent = '-50% Tempo (Aura, alle Gegner im Radius)';
+  } else if (isAura && t.type === 'booster') {
+    document.getElementById('spTiDamageLabel').textContent = 'Effekt';
+    document.getElementById('spTiDamage').textContent = `+${Math.round(boosterDamageBuff(t.tier) * 100)}% Schaden, +${Math.round(boosterFireRateBuff(t.tier) * 100)}% Feuerrate (Türme im Radius)`;
+  } else {
+    document.getElementById('spTiDamageLabel').textContent = 'Schaden';
+    document.getElementById('spTiDamage').textContent = spEffectiveDamage(t).toFixed(1);
+    document.getElementById('spTiFireRate').textContent = (1000 / spEffectiveFireRate(t)).toFixed(2) + '/s';
+    document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
+    document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
+  }
   document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
-  document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
-  document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
   const upgradeBtn = document.getElementById('spTiUpgradeBtn');
   if (maxed) {
     upgradeBtn.textContent = 'Max. Tier erreicht';

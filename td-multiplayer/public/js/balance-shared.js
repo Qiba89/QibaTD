@@ -95,18 +95,27 @@ function drawLevelStars(ctx, x, y, tier) {
   }
 }
 
-// ── Ziel-Icons (Boden/Luft): gilt für Türme (beide Modi) ────────────────────────────────
+// ── Ziel-Icons (Boden/Luft/Aura): gilt für Türme (beide Modi) ────────────────────────────
 // Nachtrag (UI, auf Nutzeranfrage: "erstell noch nen tooltipp icon für Kanone [Boden] und Tesla
 // [Luft], die anderen kriegen beide wenn sie auf beides schießen können"). Kleines Icon-Paar direkt
 // neben dem Turmnamen in der Bau-Palette, mit nativem Hover-Tooltip (title-Attribut) - zeigt auf
 // einen Blick, welche Zieltypen ein Turm treffen kann, ohne dass man ihn erst bauen/anklicken muss.
 // 👣 = trifft Bodeneinheiten, ✈️ = trifft fliegende Einheiten. Kanone (`groundOnly`) zeigt nur 👣,
-// Tesla (`airOnly`) nur ✈️, alle anderen Türme (weder Flag gesetzt, treffen beides) zeigen beide
-// Icons nebeneinander. Gemeinsam hier in balance-shared.js statt dupliziert in MP/SP, da beide
-// Modi dieselben groundOnly/airOnly-Flags auf ihren Turm-Definitionen verwenden (TOWER_TYPES /
-// SP_TOWER_TYPES). Gilt nur für kämpfende Türme - für die Mine (kein Kampfwert, feuert nie) wird
-// diese Funktion an den Aufrufstellen bewusst nicht verwendet.
+// Tesla (`airOnly`) nur ✈️, alle anderen kämpfenden Türme (weder Flag gesetzt, treffen beides)
+// zeigen beide Icons nebeneinander. Gemeinsam hier in balance-shared.js statt dupliziert in MP/SP,
+// da beide Modi dieselben groundOnly/airOnly-Flags auf ihren Turm-Definitionen verwenden
+// (TOWER_TYPES / SP_TOWER_TYPES). Gilt nur für kämpfende Türme - für die Multiplayer-Mine (kein
+// Kampfwert, feuert nie) wird diese Funktion an der Aufrufstelle bewusst nicht verwendet.
+// Nachtrag (Aura-Türme, auf Nutzeranfrage "änder auch das tooltip, ein Aura symbol" für die
+// Frost-Aura + "Also der Booster ist auch eine Aura"): Türme mit `kind: 'aura'` (aktuell nur im
+// Endlos-Modus: Frost, Booster) feuern nie und haben kein Boden/Luft-Ziel - stattdessen EIN
+// 🌀-Icon, der Tooltip-Text unterscheidet über `auraTarget`, worauf die Aura wirkt (Gegner
+// verlangsamen vs. Türme verstärken).
 function towerTargetIconsHtml(t) {
+  if (t.kind === 'aura') {
+    const label = t.auraTarget === 'towers' ? 'Aura: verstärkt Türme im Radius' : 'Aura: verlangsamt Gegner im Radius, kontinuierlich, kein Projektil';
+    return `<span class="target-icon" title="${label}">🌀</span>`;
+  }
   const groundIcon = '<span class="target-icon" title="Trifft Bodeneinheiten">👣</span>';
   const airIcon = '<span class="target-icon" title="Trifft fliegende Einheiten">✈️</span>';
   if (t.groundOnly) return groundIcon;

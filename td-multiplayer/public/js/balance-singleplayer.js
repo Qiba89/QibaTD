@@ -15,7 +15,26 @@
 const SP_TOWER_TYPES = {
   arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 6 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 4, splash: 45, groundOnly: true },
-  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 7, slow: 0.5, slowDuration: 1500 },
+  // Nachtrag (Balance-Fix, auf Nutzeranfrage "frost turm soll kein schaden mehr machen, er ist
+  // stattdessen eine AURA"): kein Schaden/Feuerrate/Projektil mehr - `kind: 'aura'` markiert Frost
+  // (zusammen mit dem neuen Booster-Turm unten) als reinen Aura-Turm, siehe Herleitung/Umsetzung im
+  // Abschnitt "Aura-Türme" in docs/balancing.md. `range` bleibt als Basiswert erhalten und wird über
+  // die normale effectiveRange()-Tier-Skalierung (aus balance-shared.js) größer - höheres Tier
+  // vergrößert also den Aura-Radius. `slow` bleibt als Marker-Feld stehen; die tatsächliche Stärke
+  // (-50% Tempo) ist in index.html fest verdrahtet (unverändert seit vor diesem Nachtrag) und wird
+  // jetzt kontinuierlich für jeden Gegner im Radius nachgetriggert, statt einmalig pro Projektil-Treffer.
+  frost:  { name: 'Frostturm', cost: 80,  range: 100, color: '#63b3ed', slow: 0.5, kind: 'aura', auraTarget: 'enemies' },
+  // Booster-Turm (Nachtrag, auf Nutzeranfrage "wir fügen auch den turm Booster ein, der erhöht von
+  // umliegend türmen im Radius 1 Feld, schaden und schnelligkeit. start kosten 150" + Folgenachricht
+  // "Also der Booster ist auch eine Aura"): reiner Support-Turm, feuert nie, wählt kein Ziel -
+  // verstärkt stattdessen kontinuierlich alle KÄMPFENDEN Türme (nicht sich selbst, nicht andere
+  // Auren) innerhalb `range` um mehr Schaden UND schnellere Feuerrate (siehe boosterDamageBuff()/
+  // boosterFireRateBuff() unten, angewendet in spEffectiveDamage()/spEffectiveFireRate() in
+  // index.html). `range: 60` = 1,5 Feld (CELL=40px) - deckt genau die 8 angrenzenden Zellen ab
+  // ("Radius 1 Feld"): Diagonal-Nachbar-Abstand ist 40×√2≈56,6px (< 60, zählt), 2 Zellen entfernt
+  // sind 80px (> 60, zählt nicht). Wächst mit Tier über dieselbe effectiveRange()-Skalierung wie
+  // jeder andere Turm auch (bis zum üblichen RANGE_CAP_MULT-Deckel).
+  booster: { name: 'Booster-Turm', cost: 150, range: 60, color: '#a78bfa', kind: 'aura', auraTarget: 'towers' },
   // Tesla-Turm (Nachtrag): 1:1 aus dem Multiplayer übernommen (siehe TOWER_TYPES.tesla in
   // balance-multiplayer.js für die volle Herleitung von Kosten/Schaden/Kettensprüngen) - reiner
   // Anti-Air-Spezialist (`airOnly`), notwendig geworden seit den Flieger-Wellen ab Welle 12
@@ -142,6 +161,32 @@ const SP_PERFECT_WAVE_BONUS_TIER4 = 0.50;     // Wirtschaft T4
 const SP_LIFE_GEN_INTERVAL_MS = 90000;        // Angriff T1
 const SP_FIRERATE_BOOST_TIER2 = 0.10;         // Angriff T2
 const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
+
+// ── Booster-Turm-Buff-Stärke (Nachtrag) ─────────────────────────────────────
+// Wächst mit dem Booster-eigenen Tier, gedeckelt (gleiches Prinzip wie bei den DAMAGE_CAP_MULT_*-
+// Deckeln in balance-shared.js - ein Support-Turm soll nicht unbegrenzt stark werden). Bei Tier 0:
+// +15% Schaden / +10% Feuerrate für Türme im Radius; bei Tier 50 gedeckelt bei +50% / +35%.
+const SP_BOOSTER_DAMAGE_BUFF_BASE = 0.15;
+const SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER = 0.01;
+const SP_BOOSTER_DAMAGE_BUFF_CAP = 0.50;
+const SP_BOOSTER_FIRERATE_BUFF_BASE = 0.10;
+const SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER = 0.008;
+const SP_BOOSTER_FIRERATE_BUFF_CAP = 0.35;
+function boosterDamageBuff(tier) { return Math.min(SP_BOOSTER_DAMAGE_BUFF_BASE + SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_DAMAGE_BUFF_CAP); }
+function boosterFireRateBuff(tier) { return Math.min(SP_BOOSTER_FIRERATE_BUFF_BASE + SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_FIRERATE_BUFF_CAP); }
+
+// ── Gegner-Schild & Tempo-Immunität ab Welle 25 (Nachtrag, auf Nutzeranfrage) ───────────────
+// Ab Welle 25 bekommt jeder gespawnte Gegner (alle Wellentypen, auch der Boss selbst) einen Schild,
+// der einen Treffer komplett absorbiert (unabhängig vom Schaden pro Treffer) bevor die HP überhaupt
+// angegriffen werden, siehe damageEnemy() in index.html. Ab Welle 45 zusätzlich verstärkt auf 2
+// Treffer. Separat (gleiche Wellenschwelle 25, aber ein unabhängiger Mechanismus): "schnelle" Gegner
+// werden ab Welle 25 komplett immun gegen die Frost-Aura - definiert als Schwarm- und Flieger-Wellen,
+// die einzigen beiden Gegner-Kategorien mit einem Geschwindigkeits-Multiplikator > 1 (siehe
+// makeWaveEnemies() in index.html, `fast`-Flag pro Gegner).
+const SP_ENEMY_SHIELD_WAVE_1_HIT = 25;
+const SP_ENEMY_SHIELD_WAVE_2_HITS = 45;
+const SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE = 25;
+function enemyShieldHitsForWave(w) { return w >= SP_ENEMY_SHIELD_WAVE_2_HITS ? 2 : (w >= SP_ENEMY_SHIELD_WAVE_1_HIT ? 1 : 0); }
 
 // ── Automatischer Wellenstart (Nachtrag) ────────────────────────────────────
 // Nach der Wellenzusammenfassung startet die nächste Welle jetzt von selbst statt auf einen
