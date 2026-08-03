@@ -4,8 +4,13 @@
 // Siehe docs/balancing.md für Tabellen & Design-Begründung.
 
 // Türme
+// Nachtrag (Reichweiten-Fix, User-Feedback "Türme haben zu wenig Reichweite" + "Arrow-Turm sollte
+// mindestens x1,5 Reichweite ggü. Kanone haben"): Pfeilturm-Basisreichweite 110→135, damit das
+// Verhältnis zur Kanone (90) exakt ×1.5 beträgt (135/90 = 1.5) - unabhängig vom separaten
+// CELL/VSCALE-Fix in index.html (der beide Werte gleichermaßen skaliert und das Verhältnis daher
+// nicht verändert).
 const TOWER_TYPES = {
-  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 9,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
+  arrow:  { name: 'Pfeilturm', cost: 50,  range: 135, damage: 9,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45, groundOnly: true },
   frost:  { name: 'Frostturm', cost: 80,  range: 100, aura: true, slow: 0.5, slowDuration: 1500, color: '#63b3ed' },
   // Tesla-Turm (Nachtrag): reiner Anti-Air-Spezialist - feuert NUR auf Fliegende (`airOnly`,

@@ -670,6 +670,19 @@ const CELL = 80;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
+// Nachtrag (Bugfix, User-Feedback "Türme haben aufeinmal zu wenig Reichweite ... wahrscheinlich
+// Canvas-Vergrößerung"): TOWER_TYPES.range/splash/projSpeed (aus balance-multiplayer.js) sind für
+// CELL=40 kalibriert (analog zu SP_TOWER_TYPES im zweiten Script-Block, siehe dortiger
+// VSCALE-Kommentar) - als CELL hier auf 80 verdoppelt wurde, fehlte (anders als im SP-Block) die
+// passende ×VSCALE-Hochskalierung, wodurch jede Turm-Reichweite nur noch die halbe relative
+// Feldabdeckung hatte. Analog zum SP-Fix einmalig hier hochskaliert - ändert nur die Optik/absolute
+// Pixelreichweite, nicht die Reichweite in Spielfeldern (die bleibt exakt wie zuvor kalibriert).
+const VSCALE = CELL / 40;
+Object.values(TOWER_TYPES).forEach(t => {
+  if (t.range != null) t.range *= VSCALE;
+  if (t.splash != null) t.splash *= VSCALE;
+  if (t.projSpeed != null) t.projSpeed *= VSCALE;
+});
 // Nachtrag (Balance-Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen
 // ohne reichweiten beschränkung"): der Kettenblitz sprang bisher nur zu fliegenden Zielen innerhalb
 // einer festen Sprungreichweite (früher hier als TESLA_CHAIN_RANGE definiert) - Tesla wurde dadurch
@@ -827,12 +840,17 @@ function mpDrawSpr(ctx, key, cx, cy, targetW) {
 }
 // mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
 // expliziter Parameter (statt geschlossenem globalen ctx wie in SP) passend zum drawLane(ctx,...)-Stil.
+// Nachtrag (User-Feedback "Sprites sollen auf der x-Achse aufliegen, damit es aussieht als würden
+// sie auf dem Weg laufen"): (cx,cy) war bisher der Bild-MITTELPUNKT (cy - h/2) - dadurch "schweben"
+// höhere/breitere Sprites frei um den Weg-Punkt statt mit den Füßen darauf zu stehen. Jetzt ist
+// (cx,cy) der FUSSPUNKT (cy - h, also Bild oberhalb von cy) - horizontal bleibt cx weiterhin die
+// Bildmitte (cx - targetW/2), nur vertikal wird nicht mehr zentriert, sondern am Boden verankert.
 function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
   return true;
 }
 // Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
@@ -2242,21 +2260,31 @@ function drawLane(ctx, structures, units, projectiles) {
     // icecube->flugeinheit und titan->boss). Sprite-Stufe = u.tier (0-10, 1:1 dieselbe Skala wie die
     // 10 Lauf-Sprite-Level), mindestens Stufe 1 (es gibt kein *_L0_walk-Bild). Fallback auf die
     // bisherige Kreis-Optik, falls Bild (noch) nicht geladen oder u.key keiner Kategorie zugeordnet ist.
-    const visKind = MP_UNIT_VISUAL_KIND[u.key];
-    const visLevel = Math.max(1, Math.min(10, u.tier || 0));
+    // Bugfix (User-Feedback "Boss-Sprites lvl1-10 verwenden"): Boss-Objekte (tickBossSpawn()) haben
+    // KEIN u.key (nur u.isBoss/u.bossIndex) - MP_UNIT_VISUAL_KIND[u.key] lieferte für Bosse also immer
+    // undefined und sie fielen komplett auf den Kreis-Fallback zurück, obwohl boss_L1..L10_walk.png
+    // längst vorhanden sind. Jetzt: Bosse nutzen 'boss' + ihren (in tickBossSpawn() bereits auf 1-10
+    // gedeckelten) bossIndex, alle anderen Einheiten wie bisher MP_UNIT_VISUAL_KIND[u.key] + u.tier.
+    const visKind = u.isBoss ? 'boss' : MP_UNIT_VISUAL_KIND[u.key];
+    const visLevel = u.isBoss ? (u.bossIndex || 1) : Math.max(1, Math.min(10, u.tier || 0));
     const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6);
-    const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, u.y, targetW, mpWalkAnimFrame);
+    // Nachtrag (User-Feedback "Flugeinheiten sollen ein halbes Feld höher dargestellt werden"):
+    // drawY statt u.y für alles Sichtbare (Sprite/Kreis-Fallback/Flieger-Ring/Level-Stern) - u.y
+    // selbst bleibt unverändert (Spiellogik/Kollision/Weg-Position), nur die Darstellung wird für
+    // fliegende Einheiten um eine halbe Zelle nach oben versetzt.
+    const drawY = u.y - (u.flying ? CELL / 2 : 0);
+    const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, drawY, targetW, mpWalkAnimFrame);
     if (!spriteDrawn) {
-      ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, drawY, u.radius, 0, Math.PI * 2); ctx.fill();
     }
     if (u.flying) {
       ctx.beginPath(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-      ctx.arc(u.x, u.y, u.radius + 3, 0, Math.PI * 2); ctx.stroke();
+      ctx.arc(u.x, drawY, u.radius + 3, 0, Math.PI * 2); ctx.stroke();
     }
-    if (!u.isBoss && u.tier) drawLevelStars(ctx, u.x, u.y, u.tier);
+    if (!u.isBoss && u.tier) drawLevelStars(ctx, u.x, drawY, u.tier);
     const w = u.radius * 2;
-    ctx.fillStyle = '#000'; ctx.fillRect(u.x - w / 2, u.y - u.radius - 8, w, 4);
-    ctx.fillStyle = '#7CFC00'; ctx.fillRect(u.x - w / 2, u.y - u.radius - 8, w * (u.hp / u.maxHp), 4);
+    ctx.fillStyle = '#000'; ctx.fillRect(u.x - w / 2, drawY - u.radius - 8, w, 4);
+    ctx.fillStyle = '#7CFC00'; ctx.fillRect(u.x - w / 2, drawY - u.radius - 8, w * (u.hp / u.maxHp), 4);
   });
   projectiles.forEach(p => { ctx.beginPath(); ctx.fillStyle = p.color; ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
   ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(LANE_W - 6, PATH_ROW * CELL, 6, CELL);
@@ -2477,12 +2505,16 @@ function drawSprCover(key, dx, dy, dw, dh) {
 // ENEMY_WALK_TYPES oben). Horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3)
 // kommt aus dem globalen `walkAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf.
 // vervielfachten Spielgeschwindigkeit - siehe updateEffects()).
+// Nachtrag (User-Feedback "Sprites sollen auf der x-Achse aufliegen, damit es aussieht als würden
+// sie auf dem Weg laufen", analog zum Multiplayer-Pendant mpDrawWalkAnim()): (cx,cy) ist jetzt der
+// Fußpunkt (cy - h) statt der Bildmittelpunkt (cy - h/2) - horizontal bleibt cx weiterhin die
+// Bildmitte.
 function drawWalkAnim(key, cx, cy, targetW, frameIdx) {
   const rec = SPR[key];
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
   return true;
 }
 // Deterministische Pseudo-Zufallszahl aus (c,r) - für die feste Deko-Platzierung (Bäume/Zelte) auf
@@ -3478,10 +3510,17 @@ function draw() {
   // enemies
   enemies.forEach(e => {
     // Nachtrag (visuelle Aufwertung): weicher Bodenschatten unter jedem Gegner, gibt etwas Tiefe.
+    // Bleibt bewusst bei e.y (Boden-/Wegposition), auch für fliegende Einheiten - siehe drawY unten.
     ctx.beginPath();
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.ellipse(e.x, e.y + e.radius * 0.7, e.radius * 0.9, e.radius * 0.35, 0, 0, Math.PI*2);
     ctx.fill();
+
+    // Nachtrag (User-Feedback "Flugeinheiten sollen ein halbes Feld höher dargestellt werden"):
+    // drawY statt e.y für Sprite/Fallback-Kreis/Ringe/Healthbar - e.y selbst bleibt unverändert
+    // (Spiellogik/Kollision/Weg-Position), nur die Darstellung wird für fliegende Einheiten um eine
+    // halbe Zelle nach oben versetzt (der Bodenschatten oben bleibt bewusst am Boden).
+    const drawY = e.y - (e.flying ? CELL / 2 : 0);
 
     // Nachtrag (auf Nutzeranfrage "mit Bewegungsanimation einbinden"): animiertes Lauf-Sprite statt
     // flachem Kreis, falls geladen - visualKind (siehe pushEnemy()/makeWaveEnemies()) mappt die 5
@@ -3491,14 +3530,14 @@ function draw() {
     // den bisherigen Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
     let spriteDrawn = false;
     if (e.isBoss) {
-      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, e.y, e.radius * 3.4, walkAnimFrame);
+      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, drawY, e.radius * 3.4, walkAnimFrame);
     } else if (e.visualKind) {
-      spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, e.y, e.radius * 2.8, walkAnimFrame);
+      spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, drawY, e.radius * 2.8, walkAnimFrame);
     }
     if (!spriteDrawn) {
       ctx.beginPath();
       ctx.fillStyle = e.color;
-      ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
+      ctx.arc(e.x, drawY, e.radius, 0, Math.PI*2);
       ctx.fill();
     }
     // Flieger-Kennzeichnung (Nachtrag): weißer Ring, exakt wie im Multiplayer bei fliegenden Einheiten.
@@ -3506,7 +3545,7 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.arc(e.x, e.y, e.radius + 3 * VSCALE, 0, Math.PI*2);
+      ctx.arc(e.x, drawY, e.radius + 3 * VSCALE, 0, Math.PI*2);
       ctx.stroke();
     }
     // Schild-Kennzeichnung (Nachtrag, auf Nutzeranfrage "zeig den schild als Blauen Rahmen, leicht
@@ -3519,16 +3558,16 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = '#60a5fa';
       ctx.lineWidth = 2.5;
-      ctx.arc(e.x, e.y, e.radius + (e.flying ? 6 : 3) * VSCALE, 0, Math.PI*2);
+      ctx.arc(e.x, drawY, e.radius + (e.flying ? 6 : 3) * VSCALE, 0, Math.PI*2);
       ctx.stroke();
       ctx.restore();
     }
     // hp bar
     const w = e.radius*2;
     ctx.fillStyle = '#000';
-    ctx.fillRect(e.x - w/2, e.y - e.radius - 8 * VSCALE, w, 4 * VSCALE);
+    ctx.fillRect(e.x - w/2, drawY - e.radius - 8 * VSCALE, w, 4 * VSCALE);
     ctx.fillStyle = '#7CFC00';
-    ctx.fillRect(e.x - w/2, e.y - e.radius - 8 * VSCALE, w * (e.hp/e.maxHp), 4 * VSCALE);
+    ctx.fillRect(e.x - w/2, drawY - e.radius - 8 * VSCALE, w * (e.hp/e.maxHp), 4 * VSCALE);
   });
 
   // projectiles (Nachtrag, visuelle Aufwertung: kurzer verblassender Bewegungs-Trail statt eines
