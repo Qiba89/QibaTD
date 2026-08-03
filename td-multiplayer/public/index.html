@@ -672,7 +672,9 @@
 const CELL = 80;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
-const PATH_Y = PATH_ROW * CELL + CELL / 2;
+// Nachtrag: Einheiten und Türme sollen auf der X-Achse (unteren Kante der Zelle) aufliegen
+// Statt Zellmitte (CELL/2), nutzen wir die untere Kante (CELL)
+const PATH_Y = PATH_ROW * CELL + CELL;
 // Nachtrag (Balance-Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen
 // ohne reichweiten beschränkung"): der Kettenblitz sprang bisher nur zu fliegenden Zielen innerhalb
 // einer festen Sprungreichweite (früher hier als TESLA_CHAIN_RANGE definiert) - Tesla wurde dadurch
@@ -1314,9 +1316,10 @@ function updateInfoPanel() {
 // ── Host: direkte Simulations-Operationen ────────────────────────────────
 function newStructure(key, c, r) {
   const type = TOWER_TYPES[key];
-  const { x: cx, y: cy } = cellCenter(c, r);
-  // Nachtrag: Türme sollen wie Einheiten bottom-anchored sein - auf der unteren Kante der Zelle (r+1)*CELL statt Zellmitte
-  const s = { c, r, x: cx, y: (r + 1) * CELL, type: key, cost: type.cost, tier: 0, cooldown: 0, color: type.color };
+  const cx = c * CELL + CELL / 2; // x bleibt Zellmitte
+  // Nachtrag: Türme sollen auf der unteren Kante der Zelle aufliegen wie die Einheiten
+  const cy = (r + 1) * CELL; // untere Kante der Zelle
+  const s = { c, r, x: cx, y: cy, type: key, cost: type.cost, tier: 0, cooldown: 0, color: type.color };
   if (key !== 'mine') {
     Object.assign(s, {
       baseDamage: type.damage, baseFireRate: type.fireRate, baseRange: type.range,
