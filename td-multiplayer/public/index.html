@@ -87,19 +87,19 @@
     font-size: 12px; cursor: pointer; background: var(--accent2); color: #04201d;
   }
 
-  #game { display: none; flex-direction: column; gap: 12px; width: 100%; padding: 12px; position: relative; }
+  #game { display: grid; width: 100%; padding: 12px; position: relative; grid-template-columns: 1fr 200px 1fr auto; gap: 12px; grid-template-rows: auto auto auto auto; }
 
-  .stat-bars { display: flex; gap: 12px; margin-bottom: 0; width: 100%; flex-direction: row; position: fixed; top: 12px; left: 12px; right: 250px; z-index: 10; }
+  .stat-bars { display: flex; gap: 12px; margin: 0; width: 100%; flex-direction: row; grid-column: 1 / 4; grid-row: 1; }
   .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
   .stat-card.mine { border-color: var(--accent2); }
   .stat-card.theirs { border-color: var(--accent); }
   .stat-card b { color: var(--accent); }
   .stat-card .label { font-size: 11px; color: #aab3bd; display: block; margin-bottom: 2px; }
-  .stat-card.theirs { position: fixed; bottom: 12px; left: 12px; right: 250px; width: auto; margin: 0; }
+  .stat-card.theirs { grid-column: 1 / 4; grid-row: 4; }
   #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
   #connStatus.online { color: #7cd992; }
 
-  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin-bottom: 0; position: fixed; top: 92px; left: 12px; right: 250px; z-index: 10; }
+  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin: 0; grid-column: 2; grid-row: 3; align-self: center; }
   #myShieldIndicator { color: #4fd1c5; font-weight: 700; }
 
   .tech-branch { margin-bottom: 14px; }
@@ -119,7 +119,9 @@
   .tech-node .tech-desc { flex: 1; }
   .tech-node .tech-cost { font-size: 10px; color: var(--accent); white-space: nowrap; }
 
-  .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 0; margin-right: 250px; margin-top: 130px; }
+  .lanes { display: contents; }
+  .lane-block:first-child { grid-column: 1; grid-row: 3; }
+  .lane-block:last-child { grid-column: 3; grid-row: 3; }
   .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
   .flash-overlay {
     position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
@@ -135,7 +137,7 @@
   #myCanvas { cursor: pointer; }
   #oppCanvas { cursor: default; }
 
-  .controls { display: flex; gap: 8px; flex-direction: column; width: 220px; position: fixed; right: 12px; top: 60px; max-height: calc(100vh - 80px); overflow-y: auto; }
+  .controls { display: flex; gap: 8px; flex-direction: column; width: 220px; grid-column: 4; grid-row: 1 / 4; overflow-y: auto; }
   .panel { background: var(--panel); border-radius: 10px; padding: 12px; width: 220px; border: 1px solid #2c333c; }
 
   .pick-btn {
@@ -1313,7 +1315,8 @@ function updateInfoPanel() {
 function newStructure(key, c, r) {
   const type = TOWER_TYPES[key];
   const { x: cx, y: cy } = cellCenter(c, r);
-  const s = { c, r, x: cx, y: cy, type: key, cost: type.cost, tier: 0, cooldown: 0, color: type.color };
+  // Nachtrag: Türme sollen wie Einheiten bottom-anchored sein - auf der unteren Kante der Zelle (r+1)*CELL statt Zellmitte
+  const s = { c, r, x: cx, y: (r + 1) * CELL, type: key, cost: type.cost, tier: 0, cooldown: 0, color: type.color };
   if (key !== 'mine') {
     Object.assign(s, {
       baseDamage: type.damage, baseFireRate: type.fireRate, baseRange: type.range,
@@ -2177,26 +2180,56 @@ function drawLane(ctx, structures, units, projectiles) {
   // Pfad-Reihe, je in 3-Spalten-Gruppen mit abwechselnder Kachel gezeichnet - siehe
   // MP_GROUND_BAND_TILES/MP_BAND_GROUPS/mpDrawGroundTileBand() weiter oben. Vollständiger Fallback
   // auf die alte Schachbrett-Optik pro Zelle, falls ein Bild (noch) nicht geladen ist.
+  // Nachtrag (Nutzeranfrage): die Gelände-Kacheln sollen 3×3 Blöcke (180×180px) groß bleiben,
+  // nicht skaliert werden - oben wird der obere Rand abgeschnitten, unten sitzt es genau unter dem Weg.
+  const TILE_SIZE = 180; // native Größe der Kacheln (180×180px)
+  const TILE_BLOCK_WIDTH = 3 * CELL; // wie breit eine 3er-Gruppe ist (240px bei CELL=80)
   const topRows = PATH_ROW, bottomRows = LANE_ROWS - PATH_ROW - 1;
-  MP_BAND_GROUPS.forEach((g, i) => {
-    const tileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
-    const gx = g.c0 * CELL, gw = g.cols * CELL;
-    if (topRows > 0 && !mpDrawGroundTileBand(ctx, tileKey, gx, 0, gw, topRows * CELL)) {
-      for (let r = 0; r < topRows; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
-        ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
-        ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+
+  // Oben: große Kacheln, oberer Rand abgeschnitten
+  if (topRows > 0) {
+    MP_BAND_GROUPS.forEach((g, i) => {
+      const tileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
+      const gx = g.c0 * CELL; // x-Position des 3er-Blocks
+      const drawWidth = g.cols * CELL; // wie viele Spalten dieser Block hat (max 3*CELL)
+      const rec = MP_SPR[tileKey];
+      if (rec && rec.ready) {
+        // Tile nativ 180×180px zeichnen, aber oben abgeschnitten um nur topRows*CELL sichtbar zu machen
+        const visibleH = topRows * CELL; // nur diese Höhe sichtbar
+        const cropTop = TILE_SIZE - visibleH; // ab hier von der Quellkachel nehmen (abschneiden von oben)
+        ctx.drawImage(rec.img, 0, cropTop, TILE_SIZE, visibleH, gx, 0, drawWidth, visibleH);
+      } else {
+        // Fallback
+        for (let r = 0; r < topRows; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
+          ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
+          ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+        }
       }
-    }
-    if (bottomRows > 0) {
-      const by = (PATH_ROW + 1) * CELL;
-      if (!mpDrawGroundTileBand(ctx, tileKey, gx, by, gw, bottomRows * CELL)) {
+    });
+  }
+
+  // Unten: große Kacheln, oben abgeschnitten um nur die untere Hälfte zu zeigen
+  if (bottomRows > 0) {
+    const by = (PATH_ROW + 1) * CELL;
+    MP_BAND_GROUPS.forEach((g, i) => {
+      const tileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
+      const gx = g.c0 * CELL;
+      const drawWidth = g.cols * CELL;
+      const rec = MP_SPR[tileKey];
+      if (rec && rec.ready) {
+        // Tile nativ 180×180px zeichnen, aber oben abgeschnitten (nur untere Hälfte)
+        const visibleH = bottomRows * CELL; // nur diese Höhe sichtbar
+        const cropTop = TILE_SIZE / 2; // ab der Mitte der Kachel nehmen (obere Hälfte wegschneiden)
+        ctx.drawImage(rec.img, 0, cropTop, TILE_SIZE, visibleH, gx, by, drawWidth, visibleH);
+      } else {
+        // Fallback
         for (let r = PATH_ROW + 1; r < LANE_ROWS; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
           ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
           ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
         }
       }
-    }
-  });
+    });
+  }
   // Weg (gerade Ost-West-Strecke über die volle Breite): nur noch `ground_r2c1`, pro Spalte exakt
   // auf eine Zelle gezogen - wird wie zuvor über den Gelände-Hintergrund gezeichnet.
   for (let c = 0; c < LANE_COLS; c++) {
