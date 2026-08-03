@@ -1,0 +1,278 @@
+// ── Balancing-Werte: Singleplayer / Endlos-Modus ───────────────────────────
+// Ausgelagert aus index.html (war vorher inline im zweiten <script>-Block,
+// innerhalb der IIFE). Geteilte Tier-Skalierung (Türme) steht in
+// balance-shared.js. Siehe docs/balancing.md für Tabellen & Design-Begründung.
+//
+// Hinweis: SP_TOWER_TYPES ist ABSICHTLICH ein eigenes Objekt, nicht identisch
+// mit TOWER_TYPES aus balance-multiplayer.js:
+//  - projSpeed steht in anderen Einheiten als im Multiplayer-Objekt (dort
+//    px/s bei kontinuierlicher Simulation, hier px/Frame) — siehe
+//    docs/balancing.md, Abschnitt "Bekannte Unterschiede MP/SP".
+//  - `groundOnly`/`airOnly` gab es hier lange nicht (keine fliegenden Gegner im Endlos-Modus) -
+//    seit dem Flieger-Wellen-Nachtrag (ab Welle 12, siehe waveType()) jetzt doch, exakt nach dem
+//    Multiplayer-Vorbild: nur die Kanone kann Flieger NICHT treffen, nur der Tesla-Turm kann NUR
+//    Flieger treffen, alle anderen Türme treffen beides.
+const SP_TOWER_TYPES = {
+  arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 8,  fireRate: 500,  color: '#4fd1c5', projSpeed: 6 },
+  cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 4, splash: 45, groundOnly: true },
+  // Nachtrag (Balance-Fix, auf Nutzeranfrage "frost turm soll kein schaden mehr machen, er ist
+  // stattdessen eine AURA"): kein Schaden/Feuerrate/Projektil mehr - `kind: 'aura'` markiert Frost
+  // (zusammen mit dem neuen Booster-Turm unten) als reinen Aura-Turm, siehe Herleitung/Umsetzung im
+  // Abschnitt "Aura-Türme" in docs/balancing.md. `range` bleibt als Basiswert erhalten und wird über
+  // die normale effectiveRange()-Tier-Skalierung (aus balance-shared.js) größer - höheres Tier
+  // vergrößert also den Aura-Radius. `slow` bleibt als Marker-Feld stehen; die tatsächliche Stärke
+  // (-50% Tempo) ist in index.html fest verdrahtet (unverändert seit vor diesem Nachtrag) und wird
+  // jetzt kontinuierlich für jeden Gegner im Radius nachgetriggert, statt einmalig pro Projektil-Treffer.
+  frost:  { name: 'Frostturm', cost: 80,  range: 100, color: '#63b3ed', slow: 0.5, kind: 'aura', auraTarget: 'enemies' },
+  // Booster-Turm (Nachtrag, auf Nutzeranfrage "wir fügen auch den turm Booster ein, der erhöht von
+  // umliegend türmen im Radius 1 Feld, schaden und schnelligkeit. start kosten 150" + Folgenachricht
+  // "Also der Booster ist auch eine Aura"): reiner Support-Turm, feuert nie, wählt kein Ziel -
+  // verstärkt stattdessen kontinuierlich alle KÄMPFENDEN Türme (nicht sich selbst, nicht andere
+  // Auren) innerhalb `range` um mehr Schaden UND schnellere Feuerrate (siehe boosterDamageBuff()/
+  // boosterFireRateBuff() unten, angewendet in spEffectiveDamage()/spEffectiveFireRate() in
+  // index.html). `range: 60` = 1,5 Feld (CELL=40px) - deckt genau die 8 angrenzenden Zellen ab
+  // ("Radius 1 Feld"): Diagonal-Nachbar-Abstand ist 40×√2≈56,6px (< 60, zählt), 2 Zellen entfernt
+  // sind 80px (> 60, zählt nicht). Wächst mit Tier über dieselbe effectiveRange()-Skalierung wie
+  // jeder andere Turm auch (bis zum üblichen RANGE_CAP_MULT-Deckel).
+  booster: { name: 'Booster-Turm', cost: 150, range: 60, color: '#a78bfa', kind: 'aura', auraTarget: 'towers' },
+  // Tesla-Turm (Nachtrag): 1:1 aus dem Multiplayer übernommen (siehe TOWER_TYPES.tesla in
+  // balance-multiplayer.js für die volle Herleitung von Kosten/Schaden/Kettensprüngen) - reiner
+  // Anti-Air-Spezialist (`airOnly`), notwendig geworden seit den Flieger-Wellen ab Welle 12
+  // (`waveType()` unten): Boden-Türme können diese Gegner nicht treffen (außer der ohnehin schon
+  // `groundOnly`-Kanone, die sie nie treffen konnte). Kettenblitz-Sprünge über `teslaChainJumps()`
+  // (aus balance-multiplayer.js, global verfügbar, keine Duplizierung nötig).
+  tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 8, airOnly: true },
+  // Nachtrag (Balance-Fix, auf Nutzeranfrage "lass uns die mine entfernen"): die Mine (vormals hier
+  // als eigener, nicht-kämpfender Turmtyp hinter Wirtschaft-Tech-Tier-1 verriegelt, siehe Changelog)
+  // wurde komplett entfernt - kein Turmtyp im Endlos-Modus mehr. Wirtschaft-Tech-Tier-1 wurde dafür
+  // auf einen pauschalen Kill-Gold-Bonus umgewidmet, siehe SP_KILL_GOLD_FLAT_BONUS_TIER1 unten und
+  // SP_TECH_LABELS. Der Multiplayer behält seine Minen unverändert (dort nicht angefragt).
+  // Titan-Turm: Endlos-Modus-Entsprechung des Multiplayer-Titans (Elite-Einheit, dort erst mit
+  // Angriffs-Tech Tier 4 freigeschaltet). Da der Endlos-Modus keine sendbaren Einheiten kennt, wird
+  // aus "Elite-Einheit freigeschaltet" hier "Elite-TURM freigeschaltet" - bleibt hinter derselben
+  // Tech-Stufe (`requiresTech: {branch:'attack', tier:4}`) verriegelt, die jetzt 2 statt 1 Tech-Punkt
+  // kostet (siehe spTechPointCost() unten) - explizit auf Nutzeranfrage, da der Turm als zu stark
+  // eingeschätzt wurde. Bewusst reiner Einzelziel-Hochschaden-Turm statt Fläche (Kanone deckt Fläche
+  // schon ab): Kosten 250 (5× Pfeilturm), Grund-DPS 60/0.9s ≈ 66.7 vs. Pfeilturm 8/0.5s = 16 (≈×4.2)
+  // - ein spürbarer Endgame-Powerspike, der die volle Investition in den Angriffs-Zweig belohnt.
+  // Nachtrag: belegt jetzt ein 2×2-Baufeld (`footprint: 2`, 4 Zellen) statt nur einer Zelle -
+  // zusätzlich zum Tech-Punkte-Preis ein zweiter Hebel gegen "zu stark", der den Turm auch räumlich
+  // teurer macht (verdrängt effektiv 4 mögliche Pfeilturm-Plätze) und ihn dadurch auf offene, große
+  // Baufelder beschränkt statt überall reinzupassen wie die anderen Türme.
+  titan:  { name: 'Titan-Turm', cost: 250, range: 130, damage: 60, fireRate: 900, color: '#f43f5e', projSpeed: 6, requiresTech: { branch: 'attack', tier: 4 }, footprint: 2 },
+};
+
+// ── Skalierungs-Spezifikation (tower_defense_skalierung.md) — Endlos-Modus:
+// kein Wellen-Limit, das Boss/Schwarm/Verschnaufpause-Muster wiederholt sich für immer.
+const SWARM_HP_MULT = 0.6;
+const SWARM_COUNT_MULT = 1.8;
+const BOSS_ESCORT_HP_MULT = 0.7;
+const POST_BOSS_RELIEF_MULT = 0.75;
+
+// Gegner-HP
+const HP_BASE = 50;
+const HP_GROWTH_PER_WAVE = 0.09;         // g
+
+// Gold-Ökonomie
+const INTEREST_RATE = 0.06;
+const INTEREST_CAP = 30;
+
+// Flieger-Wellen (Nachtrag): ab Welle 12, danach alle 10 Wellen (12, 22, 32, ...) - auf
+// Nutzeranfrage ("wir benötigen ab runde 12 alle 10 runden flug einheiten runden"). Praktischer
+// Glücksfall: 12, 22, 32, ... liegen alle bei w%5===2, was im bestehenden Schema ohnehin immer
+// "normal" ergibt - die Flieger-Welle verdrängt also nie eine Boss-/Schwarm-/Verschnaufpause-Welle,
+// deshalb steht die Prüfung hier bewusst VOR den anderen Fällen (auch wenn sie durch den Glücksfall
+// nie mit ihnen kollidiert, ist die Prioritätsreihenfolge so unmissverständlich).
+function waveType(w) {
+  if (w >= 12 && (w - 12) % 10 === 0) return 'flying';
+  if (w % 5 === 0) return 'boss';
+  if (w % 5 === 3) return 'swarm';
+  if (w % 5 === 1 && w > 1) return 'relief';
+  return 'normal';
+}
+function baseHp(w) { return HP_BASE * Math.pow(1 + HP_GROWTH_PER_WAVE, w - 1); }
+function bossMult(w) { return 3.0 + 0.3 * ((w / 5) - 1); }
+function baseCount(w) { return 6 + w * 2; }
+function killGoldBase(w) { return 2 * Math.pow(1.045, w - 1); }
+function waveIncome(w) { return 20 + 4 * w; }
+
+// Spawn-Takt: startet entspannter (900ms) und wird bis Welle 12 auf 500ms schneller.
+// Grund: bei festem 500ms-Takt ist der Schaden-Durchsatz früher Türme rechnerisch
+// nicht ausreichend, um mit dem Nachschub an Gegnern Schritt zu halten (Wellen 1–7
+// waren unschaffbar, siehe Kalkulation). Diese Rampe macht den Start spielbar,
+// ohne die Ziel-HP-Kurve selbst zu verändern.
+function spawnIntervalMs(w) {
+  return Math.max(500, 900 - (w - 1) * (400 / 11));
+}
+
+// ── Tech-Tree (Endlos-Modus-Port des Multiplayer-Tech-Trees) ───────────────
+// Gleiche Struktur wie im Multiplayer (3 Zweige, je 4 Stufen, linear, 1 Punkt/Stufe), aber jede
+// PvP-spezifische Stufe wurde für den Endlos-Modus sinnvoll neu interpretiert, da es hier keinen
+// Gegner-Spieler und kein Einheiten-Senden gibt. Details + Begründung pro Stufe in docs/balancing.md,
+// Abschnitt "Tech-Tree (Endlos-Modus)".
+// Nachtrag (Balance-Fix, auf Nutzeranfrage "lass uns die mine entfernen und +1 gold auf einen mob
+// kill machen"): Wirtschaft Tier 1 schaltete bisher die (jetzt komplett entfernte) Mine frei -
+// widmet sich stattdessen um zu einem pauschalen, additiven Kill-Gold-Bonus (siehe
+// SP_KILL_GOLD_FLAT_BONUS_TIER1 unten, angewendet in damageEnemy() in index.html VOR dem
+// prozentualen Wirtschaft-T2-Bonus "Kill-Gold +10%", der dadurch auch auf diesen T1-Bonus wirkt).
+const SP_TECH_MAX_TIER = 4;
+const SP_TECH_BRANCHES = ['defense', 'economy', 'attack'];
+const SP_TECH_LABELS = {
+  defense: { name: '🛡️ Verteidigung', tiers: ['Basis-Regeneration (+1 Leben alle 60s)', 'Schild (3 Treffer abfangen, lädt alle 90s)', 'Turm-Reichweite +10%', 'Bollwerk (+5 Max-Leben)'] },
+  economy: { name: '💰 Wirtschaft', tiers: ['Kill-Gold +1 pro Kill', 'Kill-Gold +10%', 'Zinsen (zusätzlich +4% Wellenend-Verzinsung, einmalig pro Welle)', 'Perfekte Welle (+50% Welleneinkommen, falls kein Leben verloren)'] },
+  attack:  { name: '⚔️ Angriff', tiers: ['Wachtrupp (+1 Leben alle 90s, automatisch)', 'Turm-Feuerrate +10%', 'Turm-Schaden +15%', 'Titan-Turm freigeschaltet (Elite-Turm, 2 Punkte)'] },
+};
+// Nachtrag (Balance): Angriff-Tier-4 (schaltet den als zu stark eingeschätzten Titan-Turm frei)
+// kostet jetzt 2 Tech-Punkte statt 1 - explizit auf Nutzeranfrage ("Titanen turm ... sollte 2 Punkte
+// kosten"), alle anderen Stufen bleiben bei pauschal 1 Punkt.
+function spTechPointCost(tier, branch) { return (branch === 'attack' && tier === 4) ? 2 : 1; }
+
+// Tech-Punkte-Kauf mit Gold: gleiche Fibonacci-Formel wie im Multiplayer, aber Basis ×100 statt
+// ×1000 - die Endlos-Wirtschaft bewegt sich in einer deutlich kleineren Größenordnung (Startgold
+// 220, Welleneinkommen 20+4×Welle) als die Multiplayer-Wirtschaft (Minen/Zinsen/Steuern erreichen
+// dort schnell vier-/fünfstellige Goldbestände) - beim gleichen ×1000-Maßstab wären Tech-Punkte im
+// Endlos-Modus praktisch unbezahlbar.
+function spTechPointBuyCost(n) {
+  let a = 1, b = 2;
+  if (n <= 1) return 100 * a;
+  for (let i = 2; i < n; i++) { const c = a + b; a = b; b = c; }
+  return 100 * b;
+}
+
+// Effekt-Konstanten pro Stufe (siehe SP_TECH_LABELS oben für die Beschreibungen):
+const SP_LIFE_REGEN_INTERVAL_MS = 60000;      // Verteidigung T1
+const SP_SHIELD_CHARGES = 3;                  // Verteidigung T2
+const SP_SHIELD_COOLDOWN_MS = 90000;          // Verteidigung T2
+const SP_RANGE_BOOST_TIER3 = 0.10;            // Verteidigung T3
+const SP_BOLLWERK_BONUS_LIVES = 5;            // Verteidigung T4
+// Wirtschaft T1 (Nachtrag/Balance-Fix, ersetzt die entfernte Mine): pauschaler additiver
+// Kill-Gold-Bonus statt Minen-Freischaltung, siehe Kommentar bei SP_TECH_LABELS oben.
+const SP_KILL_GOLD_FLAT_BONUS_TIER1 = 1;      // Wirtschaft T1
+const SP_KILL_GOLD_BOOST_TIER2 = 0.10;        // Wirtschaft T2
+// Wirtschaft T3 "Zinsen" (Nachtrag/Balance-Fix): war ursprünglich +1%/s kontinuierlich, auf
+// Nutzeranfrage ("die 1% zinsen sind zu krass") umgebaut zu einer einmaligen Zusatzverzinsung bei
+// Wellenabschluss, addiert auf den normalen Wellenend-Zinssatz INTEREST_RATE (siehe oben) und mit
+// demselben INTEREST_CAP gedeckelt (siehe showWaveSummary() in index.html) - genau dieser gemeinsame
+// Deckel ist der eigentliche Balance-Fix: eine kontinuierliche Verzinsung pro Frame kannte praktisch
+// keine Obergrenze (kompoundierte 60×/Sekunde auf den fortlaufend wachsenden Goldbestand), eine
+// einmalige Zusatzrate pro Wellenabschluss mit gemeinsamem Deckel dagegen schon.
+const SP_INTEREST_RATE_BONUS_TIER3_PER_WAVE = 0.04;
+const SP_PERFECT_WAVE_BONUS_TIER4 = 0.50;     // Wirtschaft T4
+const SP_LIFE_GEN_INTERVAL_MS = 90000;        // Angriff T1
+const SP_FIRERATE_BOOST_TIER2 = 0.10;         // Angriff T2
+const SP_DAMAGE_BOOST_TIER3 = 0.15;           // Angriff T3
+
+// ── Booster-Turm-Buff-Stärke (Nachtrag) ─────────────────────────────────────
+// Wächst mit dem Booster-eigenen Tier, gedeckelt (gleiches Prinzip wie bei den DAMAGE_CAP_MULT_*-
+// Deckeln in balance-shared.js - ein Support-Turm soll nicht unbegrenzt stark werden). Bei Tier 0:
+// +15% Schaden / +10% Feuerrate für Türme im Radius; bei Vollausbau gedeckelt bei +50% / +35%.
+// Nachtrag (Stern-Kompression, balance-shared.js TOWER_MAX_TIER 50 → 10): der Booster ist ein Turm
+// und teilt sich damit TOWER_MAX_TIER, aber diese Buff-Formeln liegen hier lokal (nicht in den
+// geteilten GROWTH-Konstanten) - GROWTH_PER_TIER daher hier ebenfalls ×5 hochskaliert (gleiches
+// Prinzip wie bei AS_GROWTH_PER_TIER in balance-shared.js: linear statt exponentiell, also ×5 statt
+// ^5), damit derselbe Buff-Wert wie vorher beim jeweiligen Stern-Level erreicht wird. BASE und CAP
+// bleiben unverändert (absolute Balance-Endpunkte).
+const SP_BOOSTER_DAMAGE_BUFF_BASE = 0.15;
+const SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER = 0.01 * 5;
+const SP_BOOSTER_DAMAGE_BUFF_CAP = 0.50;
+const SP_BOOSTER_FIRERATE_BUFF_BASE = 0.10;
+const SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER = 0.008 * 5;
+const SP_BOOSTER_FIRERATE_BUFF_CAP = 0.35;
+function boosterDamageBuff(tier) { return Math.min(SP_BOOSTER_DAMAGE_BUFF_BASE + SP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_DAMAGE_BUFF_CAP); }
+function boosterFireRateBuff(tier) { return Math.min(SP_BOOSTER_FIRERATE_BUFF_BASE + SP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * tier, SP_BOOSTER_FIRERATE_BUFF_CAP); }
+
+// ── Turm-Upgrades geben jetzt NUR NOCH Schaden (Nachtrag, Balance-Fix, NUR Endlos-Modus) ─────────
+// Anfrage: "die damage skalierung der türme ist zu gering. man zahlt 116 für das erste upgrade um
+// einen dmg boost zu bekommen der weit unter einem einzel turm für 50 gold ist (bei dem arrow). Das
+// ist nicht balanced. man sollte dafür 120% damage+ bekommen vom base damage. tower upgrades sollen
+// auch kein speed und reichweiten upgrade mehr geben. das kommt jetzt über den boost tower."
+//
+// Scope-Entscheidung: NUR Endlos-Modus. Der Booster-Turm, der laut Anfrage jetzt die Feuerraten-/
+// Reichweiten-Steigerung übernehmen soll ("das kommt jetzt über den boost tower"), existiert
+// ausschließlich hier (siehe SP_TOWER_TYPES.booster oben) - im Multiplayer gäbe es sonst gar keine
+// Möglichkeit mehr, Feuerrate oder Reichweite über Turm-Upgrades zu steigern. balance-shared.js
+// (effectiveDamage/effectiveFireRate/effectiveRange, weiterhin unverändert von Multiplayer-Türmen
+// direkt genutzt) und balance-multiplayer.js bleiben deshalb komplett unangetastet.
+//
+// Gilt NUR für kämpfende Türme (`kind !== 'aura'`, siehe SP_TOWER_TYPES): Frost/Booster haben keinen
+// Schaden, und ihre `range` IST ihr Wirkungsradius (nicht "Angriffsreichweite") - die bleibt
+// weiterhin über effectiveRange() (Tier-Wachstum, balance-shared.js) skaliert, sonst wäre ein
+// Frost-/Booster-Upgrade komplett wirkungslos. Umgesetzt in spEffectiveRange()/spEffectiveFireRate()/
+// spEffectiveDamage() (index.html), jeweils mit einem `kind`-Zweig bzw. direktem Rückgriff auf
+// `t.baseRange`/`t.baseFireRate` statt der geteilten Tier-Wachstumsformel.
+//
+// Schadens-Wachstumsbudget: da Feuerrate nicht mehr mitwächst, wandert ihr alter Anteil am
+// Gesamt-DPS-Wachstum jetzt vollständig in den Schaden. Der alte, kombinierte DPS-Deckel
+// (Schaden-Deckel × Feuerrate-Deckel: Einzelziel 4.5×2.2=9.9, Fläche 2.6×2.2=5.72, siehe
+// balance-shared.js) wird hier zum NEUEN, alleinigen Schadens-Deckel - die Gesamt-Endstärke bei
+// Vollausbau bleibt dadurch unverändert ggü. vor diesem Nachtrag, nur früher/steiler erreicht (rein
+// durch Schaden statt Schaden+Feuerrate gemeinsam).
+//
+// Nachtrag (Nutzer-Feedback: "das zweite upgrade hat kaum damage boost gegeben ... die skalierung
+// sollte für alle stufen sein"): erste Version fixierte Stern 1 hart auf ×2.2 (+120%, wörtlich wie
+// ursprünglich angefragt) und verteilte den REST des Wachstums bis zum Deckel geometrisch auf die
+// verbleibenden 9 Stufen - das drückte die Wachstumsrate AB Stern 2 auf nur noch ~+18%/Stufe (der
+// Löwenanteil des Wachstumsbudgets war schon in den Stern-1-Sprung geflossen). Auf Rückfrage
+// entschieden: GLEICHMÄSSIGES Wachstum über alle 10 Stufen - jede Stufe multipliziert jetzt mit
+// derselben konstanten Rate (~+25,8 % Einzelziel / ~+19,1 % Fläche pro Stufe), die exakt bei Stern 10
+// den Deckel erreicht (`g = Deckel ^ (1/10)`). Kehrseite (dem Nutzer bei der Rückfrage explizit
+// genannt und bestätigt): Stern 1 liefert dadurch nur noch ~+26 % statt der ursprünglich angefragten
+// +120 % - dafür ist jede der 10 Stufen jetzt spürbar und gleich gewichtig, keine mehr "fühlt sich
+// nach nichts an". Strukturell wieder dieselbe Formel-Form wie effectiveDamage() in
+// balance-shared.js (`Basis × min(Rate^Tier, Deckel)`), nur mit eigenem, SP-lokalem Deckel/Rate.
+const SP_TOWER_DAMAGE_CAP_MULT_SINGLE = DAMAGE_CAP_MULT_SINGLE * AS_CAP_MULT; // 4.5 × 2.2 = 9.9
+const SP_TOWER_DAMAGE_CAP_MULT_AOE = DAMAGE_CAP_MULT_AOE * AS_CAP_MULT;       // 2.6 × 2.2 = 5.72
+const SP_TOWER_DAMAGE_GROWTH_SINGLE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_SINGLE, 1 / 10); // ≈ ×1.2577/Stufe
+const SP_TOWER_DAMAGE_GROWTH_AOE = Math.pow(SP_TOWER_DAMAGE_CAP_MULT_AOE, 1 / 10);       // ≈ ×1.1905/Stufe
+// AoE-Erkennung wie bei effectiveDamage() in balance-shared.js über `baseSplash > 0`.
+function spTowerDamageMult(t) {
+  const isAoe = t.baseSplash > 0;
+  const g = isAoe ? SP_TOWER_DAMAGE_GROWTH_AOE : SP_TOWER_DAMAGE_GROWTH_SINGLE;
+  const cap = isAoe ? SP_TOWER_DAMAGE_CAP_MULT_AOE : SP_TOWER_DAMAGE_CAP_MULT_SINGLE;
+  return Math.min(Math.pow(g, t.tier), cap);
+}
+
+// ── Turm-Upgrade-Kosten proportional zur Turm-Grundkosten (Nachtrag, NUR Endlos-Modus) ───────────
+// Anfrage: "alles upgrades kosten 116. für den pfeilturm passt das gut, aber für die anderen türme
+// nicht, kannst du bitte die kosten skalierung auf basis der grundkosten für alle türme anpassen.
+// nimm dafür die verhältnisse vom pfeilturm und übertrag dies auf die anderen türm. ein kanonenturm
+// stufe 2 müsste dann 232 kosten zum beispiel." Grund: die geteilte tierUpgradeCost() (unten in
+// balance-shared.js) war schon immer komplett turmtyp-unabhängig - jeder Turm zahlte für seinen
+// ersten Stern dieselben 116 Gold, egal ob er 50 Gold (Pfeilturm) oder 250 Gold (Titan) zum Bauen
+// kostet. Das fühlte sich für den Pfeilturm (Referenz-Kosten der bisherigen Kurve, siehe unten)
+// richtig an, aber für teurere Türme im Verhältnis zu billig.
+//
+// Beispielrechnung, die der Nutzer selbst vorgegeben hat: Kanone kostet 100 Gold (Pfeilturm: 50,
+// Verhältnis ×2) - "Kanonenturm Stufe 2" (= erster Upgrade-Klick, "Stufe 1" ist dabei der gebaute
+// Turm selbst) soll 232 Gold kosten = Pfeilturm-Stufe-2-Kosten (116) × 2. Also: jeder Stern-Kosten-
+// Betrag der geteilten tierUpgradeCost()-Kurve wird mit dem Verhältnis (eigene Grundkosten ÷
+// Pfeilturm-Grundkosten) skaliert - der Pfeilturm selbst bleibt dadurch exakt unverändert (Verhältnis
+// ×1). Die geteilte tierUpgradeCost() bleibt UNVERÄNDERT (weiterhin turmtyp-unabhängig, von
+// Multiplayer-Türmen/-Minen direkt genutzt) - dies ist nur ein SP-lokaler Multiplikator obendrauf.
+function spTierUpgradeCost(type, nextTier) {
+  const ratio = SP_TOWER_TYPES[type].cost / SP_TOWER_TYPES.arrow.cost;
+  return Math.round(tierUpgradeCost(nextTier) * ratio);
+}
+
+// ── Gegner-Schild & Tempo-Immunität ab Welle 25 (Nachtrag, auf Nutzeranfrage) ───────────────
+// Ab Welle 25 bekommt jeder gespawnte Gegner (alle Wellentypen, auch der Boss selbst) einen Schild,
+// der einen Treffer komplett absorbiert (unabhängig vom Schaden pro Treffer) bevor die HP überhaupt
+// angegriffen werden, siehe damageEnemy() in index.html. Ab Welle 45 zusätzlich verstärkt auf 2
+// Treffer. Separat (gleiche Wellenschwelle 25, aber ein unabhängiger Mechanismus): "schnelle" Gegner
+// werden ab Welle 25 komplett immun gegen die Frost-Aura - definiert als Schwarm- und Flieger-Wellen,
+// die einzigen beiden Gegner-Kategorien mit einem Geschwindigkeits-Multiplikator > 1 (siehe
+// makeWaveEnemies() in index.html, `fast`-Flag pro Gegner).
+const SP_ENEMY_SHIELD_WAVE_1_HIT = 25;
+const SP_ENEMY_SHIELD_WAVE_2_HITS = 45;
+const SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE = 25;
+function enemyShieldHitsForWave(w) { return w >= SP_ENEMY_SHIELD_WAVE_2_HITS ? 2 : (w >= SP_ENEMY_SHIELD_WAVE_1_HIT ? 1 : 0); }
+
+// ── Automatischer Wellenstart (Nachtrag) ────────────────────────────────────
+// Nach der Wellenzusammenfassung startet die nächste Welle jetzt von selbst statt auf einen
+// Button-Klick zu warten (Pause-Button in index.html als Gegenstück, um sich trotzdem Zeit zu
+// nehmen). 6s statt der ursprünglich vorgeschlagenen 5s: reicht, um die Gold-Abrechnung zu lesen
+// und noch 1-2 Klicks zu setzen (z.B. "Alle upgraden" oder einen Turm bauen), ohne die Partie ins
+// Stocken zu bringen. Vor Boss-Wellen bewusst länger (9s) - die Vorwarnung ("Nächste Welle ist eine
+// BOSS-Welle!") soll auch tatsächlich nutzbar sein, um gezielt nachzurüsten, nicht nur gelesen werden.
+const SP_AUTO_NEXT_WAVE_DELAY_MS = 6000;
+const SP_AUTO_NEXT_WAVE_DELAY_BOSS_MS = 9000;
