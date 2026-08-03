@@ -89,16 +89,17 @@
 
   #game { display: none; flex-direction: column; gap: 12px; width: 100%; padding: 12px; position: relative; }
 
-  .stat-bars { display: flex; gap: 12px; margin-bottom: 0; width: calc(100% - 250px); flex-direction: column; margin-right: 250px; }
+  .stat-bars { display: flex; gap: 12px; margin-bottom: 0; width: 100%; flex-direction: row; position: fixed; top: 12px; left: 12px; right: 250px; z-index: 10; }
   .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
   .stat-card.mine { border-color: var(--accent2); }
   .stat-card.theirs { border-color: var(--accent); }
   .stat-card b { color: var(--accent); }
   .stat-card .label { font-size: 11px; color: #aab3bd; display: block; margin-bottom: 2px; }
+  .stat-card.theirs { position: fixed; bottom: 12px; left: 12px; right: 250px; width: auto; margin: 0; }
   #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
   #connStatus.online { color: #7cd992; }
 
-  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin-bottom: 10px; margin-right: 250px; }
+  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin-bottom: 0; position: fixed; top: 92px; left: 12px; right: 250px; z-index: 10; }
   #myShieldIndicator { color: #4fd1c5; font-weight: 700; }
 
   .tech-branch { margin-bottom: 14px; }
@@ -118,7 +119,7 @@
   .tech-node .tech-desc { flex: 1; }
   .tech-node .tech-cost { font-size: 10px; color: var(--accent); white-space: nowrap; }
 
-  .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 0; margin-right: 250px; }
+  .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 0; margin-right: 250px; margin-top: 130px; }
   .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
   .flash-overlay {
     position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
@@ -822,7 +823,7 @@ function mpDrawSpr(ctx, key, cx, cy, targetW) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   const h = targetW * (rec.h / rec.w);
-  ctx.drawImage(rec.img, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, cx - targetW / 2, cy - h, targetW, h);
   return true;
 }
 // mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
@@ -832,7 +833,7 @@ function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
   return true;
 }
 // Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
@@ -2246,7 +2247,7 @@ function drawLane(ctx, structures, units, projectiles) {
     // MP_UNIT_VISUAL_KIND-Zuordnung.
     const visKind = u.isBoss ? 'boss' : MP_UNIT_VISUAL_KIND[u.key];
     const visLevel = u.isBoss ? u.bossIndex : Math.max(1, Math.min(10, u.tier || 0));
-    const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6);
+    const targetW = u.radius * (visKind === 'boss' ? 3.4 : 2.8);
     const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, u.y, targetW, mpWalkAnimFrame);
     if (!spriteDrawn) {
       ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
