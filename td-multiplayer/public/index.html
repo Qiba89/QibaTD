@@ -454,12 +454,12 @@
   <div class="lanes" style="display:none;">
     <div class="lane-block">
       <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
-      <canvas id="myCanvas" width="340" height="80"></canvas>
+      <canvas id="myCanvas" width="680" height="160"></canvas>
       <div class="flash-overlay" id="myFlash"></div>
     </div>
     <div class="lane-block">
       <div class="lane-label">🎯 Gegner-Verteidigung — hierhin schickst du Einheiten</div>
-      <canvas id="oppCanvas" width="340" height="80"></canvas>
+      <canvas id="oppCanvas" width="680" height="160"></canvas>
       <div class="flash-overlay" id="oppFlash"></div>
     </div>
   </div>
@@ -569,7 +569,7 @@
 
 <script>
 // ── Geometrie & Definitionen (identisch zum Einzelspieler-PvP) ──────────
-const CELL = 20;
+const CELL = 40;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
@@ -1533,7 +1533,7 @@ function hideEndOverlay() {
 
 const canvas = document.getElementById('spGameCanvas');
 const ctx = canvas.getContext('2d');
-const CELL = 20;
+const CELL = 40;
 const COLS = canvas.width / CELL;
 const ROWS = canvas.height / CELL;
 
