@@ -695,16 +695,29 @@ function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LAN
 // Canvas) einmal aufgerufen wird.
 //
 // Die MP-Lane hat nur EINE gerade Pfad-Reihe (PATH_ROW, über die volle Breite) - anders als die
-// SP-Karte (Teil 6) also KEINE Kurven, keine Sockel-Logik nötig. Fürs Gelände: dieselbe Erkenntnis
-// wie in Teil 7 (siehe docs/tileset.md, "Warum EIN Hintergrundbild statt Einzelkacheln") - das
-// `gelände 2.png`-Motiv ist ein zusammenhängendes Bild, keine frei kombinierbaren Einzelkacheln.
-// Statt es wie in SP auf die 3:2-Fläche zu croppen, passt für die MP-Lane (680×160px, 4,25:1 sehr
-// breit/flach) ein anderer Ausschnitt: die mittlere "Zahnrad-/Laternen-Gasse" des Bildes ist selbst
-// schon ein durchgehendes horizontales Band - als "cover"-Ausschnitt auf die MP-Lane passt sie ohne
-// erkennbare Bruchstellen (siehe Vorschau-Crop während der Umsetzung).
+// SP-Karte (Teil 6) also KEINE Kurven, keine Sockel-Logik nötig.
+//
+// Nachtrag (Teil 12, auf Nutzeranfrage "Nutze die tiles so, das eins für 3x3 genutzt wird. für den
+// Weg nehmen wir nur ground_r2c1, und oben fehlt dann ein drittel tile nur dafür nehmen wir die
+// mitte von ground_r1c2 und ground_r1c3 im wechsel"): ersetzt den EIN-großes-Cover-Bild-Ansatz aus
+// Teil 10 (`terrain_plaza`) durch die einzelnen `gelaende/ground_r{1-3}c{1-5}.png`-Kacheln
+// (180×180px nativ, siehe docs/tileset.md) - jede Kachel wird bei einer festen Skala von 3
+// Zellen = 1 Kachel gezeichnet (`MP_GROUND_TILE_SCALE` = 120/180 = 2/3, CELL=40 → 3 Zellen = 120px).
+// Weg: nur noch `ground_r2c1` (statt der bisherigen `way_ew_*`-Kacheln aus dem wege/-Set), pro Spalte
+// exakt auf eine Zelle (CELL×CELL) gezogen - die MP-Lane hat ohnehin nur die gerade Ost-West-Strecke,
+// keine Kurven nötig. Gelände: da PATH_ROW die 4 Reihen immer in ein 2-Reihen-Band (oben) und ein
+// 1-Reihen-Band (unten) zerschneidet, gibt es NIRGENDS 3 zusammenhängende Terrain-Reihen für eine
+// volle Kachel - stattdessen wird für jedes Band nur ein zur tatsächlichen Bandhöhe passender,
+// MITTIG aus der Quellkachel geschnittener Ausschnitt bei derselben 2/3-Skala gezeichnet
+// (`mpDrawGroundTileBand()`) - für das 80px-hohe obere Band (2 Zeilen, "fehlt ein Drittel" der vollen
+// 120px-Kachelhöhe) abwechselnd `ground_r1c2`/`ground_r1c3` alle 3 Spalten, wie vom Nutzer
+// vorgegeben. Für das untere, nur 40px hohe Band (1 Zeile, unterhalb des Wegs) gibt die Anfrage keine
+// Vorgabe - eigene Erweiterung: dieselben zwei Kacheln (`ground_r1c2`/`ground_r1c3`) wiederverwendet,
+// aus Konsistenzgründen statt eine dritte Kachelwahl einzuführen; leicht änderbar (siehe
+// MP_GROUND_BAND_TILES unten), falls der Nutzer lieber z.B. `ground_r3c2`/`ground_r3c3` dafür sehen
+// möchte. Volle Herleitung/Vorschau-Screenshots siehe docs/tileset.md, "Multiplayer-Gelände (Teil 12)".
 const MP_ASSET_FILES = {
-  terrain_plaza: 'terrain_plaza.png',
-  way_ew_a: 'way_ew_a.png', way_ew_b: 'way_ew_b.png',
+  ground_r1c2: 'ground_r1c2.png', ground_r1c3: 'ground_r1c3.png', ground_r2c1: 'ground_r2c1.png',
 };
 // Nachtrag (Teil 11): das Befüllen von MP_SPR (Bild-Ladevorgänge anstoßen) passiert jetzt erst WEITER
 // UNTEN, NACHDEM alle MP_ASSET_FILES-Einträge (inkl. der Turm-/Einheiten-Sprites aus Teil 11) gesetzt
@@ -718,33 +731,37 @@ function mpDrawSprExact(ctx, key, dx, dy, dw, dh) {
   ctx.drawImage(rec.img, dx, dy, dw, dh);
   return true;
 }
-// mpDrawSprCover(): identisch zu SPs drawSprCover() (CSS "background-size: cover"-Logik) - für den
-// Gelände-Hintergrund, der als ein Stück die komplette Lane-Fläche abdeckt statt gekachelt zu werden.
-function mpDrawSprCover(ctx, key, dx, dy, dw, dh) {
+// mpDrawGroundTileBand() (Teil 12): zeichnet einen MITTIG aus der Quellkachel geschnittenen
+// Ausschnitt bei fester MP_GROUND_TILE_SCALE-Skala, sodass jede Gelände-Kachel unabhängig von der
+// tatsächlich verfügbaren Bandhöhe/-breite in derselben "3 Zellen = 1 Kachel"-Größe erscheint - bei
+// dw=dh=3*CELL (voller Block) entspricht der Ausschnitt der kompletten 180×180px-Quellkachel, bei
+// kleineren dw/dh (wie den 80px/40px hohen Terrain-Bändern der MP-Lane) entsprechend weniger.
+const MP_GROUND_TILE_SCALE = 120 / 180; // 3 Zellen (CELL=40) je Kachel
+function mpDrawGroundTileBand(ctx, key, dx, dy, dw, dh) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
-  const srcAspect = rec.w / rec.h, dstAspect = dw / dh;
-  let sx, sy, sw, sh;
-  if (srcAspect > dstAspect) { sh = rec.h; sw = sh * dstAspect; sx = (rec.w - sw) / 2; sy = 0; }
-  else { sw = rec.w; sh = sw / dstAspect; sy = (rec.h - sh) / 2; sx = 0; }
-  ctx.drawImage(rec.img, sx, sy, sw, sh, dx, dy, dw, dh);
+  const srcW = Math.min(rec.w, dw / MP_GROUND_TILE_SCALE);
+  const srcH = Math.min(rec.h, dh / MP_GROUND_TILE_SCALE);
+  const sx = (rec.w - srcW) / 2, sy = (rec.h - srcH) / 2;
+  ctx.drawImage(rec.img, sx, sy, srcW, srcH, dx, dy, dw, dh);
   return true;
 }
-// Deterministische Pseudo-Zufallszahl aus der Spalte - für die a/b-Varianten-Wahl der geraden
-// Weg-Kacheln (analog zu SPs cellRandom()), damit eine lange gerade Strecke nicht komplett
-// identisch aussieht, die Wahl aber pro Spalte stabil bleibt (kein Frame-zu-Frame-Geflacker).
+// Deterministische Pseudo-Zufallszahl aus der Spalte (analog zu SPs cellRandom()) - hier nicht mehr
+// für eine a/b-Varianten-Wahl gebraucht (der Weg nutzt jetzt einheitlich nur `ground_r2c1`, siehe
+// oben), bleibt aber als kleine Hilfsfunktion bestehen, falls künftig wieder mehrere Weg-Varianten
+// gebraucht werden.
 function mpCellRandom(c, salt) {
   const x = Math.sin(c * 127.1 + salt * 74.7) * 43758.5453;
   return x - Math.floor(x);
 }
-// Pro Spalte vorberechnete Weg-Kachel-Variante - die gesamte PATH_ROW ist eine gerade Ost-West-
-// Strecke über die volle Breite (kein Sockel-Muster nötig, siehe isBuildable() oben: einzige Regel
-// ist "r !== PATH_ROW").
-const MP_WAY_EW_VARIANTS = ['way_ew_a', 'way_ew_b'];
-const MP_PATH_TILE_KEY = [];
-for (let c = 0; c < LANE_COLS; c++) {
-  MP_PATH_TILE_KEY[c] = MP_WAY_EW_VARIANTS[Math.floor(mpCellRandom(c, 5) * MP_WAY_EW_VARIANTS.length)];
-}
+// Terrain-Bänder oberhalb/unterhalb der Pfad-Reihe, in 3-Spalten-Gruppen alternierend (siehe
+// Nachtrag oben) - je ein Eintrag pro Band: [c0, colCount] deckt Reihe(n) row0..row0+rowCount-1 ab.
+const MP_GROUND_BAND_TILES = ['ground_r1c2', 'ground_r1c3'];
+// Dieselbe Spalten-Gruppierung gilt für beide Terrain-Bänder (oben UND unten) - eine Gruppe pro
+// Band-Instanz reicht, da nur die Spaltengrenzen berechnet werden, nicht die Kachel-Wahl selbst
+// (die passiert erst beim Zeichnen, siehe drawLane()).
+const MP_BAND_GROUPS = [];
+for (let c = 0; c < LANE_COLS; c += 3) MP_BAND_GROUPS.push({ c0: c, cols: Math.min(3, LANE_COLS - c) });
 
 // ── Einheiten- & Turm-Sprites für die MP-Lane (Teil 11, auf Nutzeranfrage "Ferner sollen im
 // Multiplayer alle Einheiten und Tower sprites hinzugefügt werden") ────────────────────────────
@@ -2149,21 +2166,37 @@ function updateUIFromState() {
 
 function drawLane(ctx, structures, units, projectiles) {
   ctx.clearRect(0, 0, LANE_W, LANE_H);
-  // Nachtrag (Teil 10, "Multiplayermap mit Maptiles versehen"): echte Kachel-Grafiken statt der
-  // bisherigen flachen Schachbrett-/Einfarb-Optik, mit vollständigem Fallback auf den alten Look,
-  // falls ein Bild (noch) nicht geladen ist - siehe MP_ASSET_FILES/mpDrawSpr*() weiter oben.
-  if (!mpDrawSprCover(ctx, 'terrain_plaza', 0, 0, LANE_W, LANE_H)) {
-    for (let r = 0; r < LANE_ROWS; r++) for (let c = 0; c < LANE_COLS; c++) {
-      if (r === PATH_ROW) continue;
-      ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
-      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+  // Nachtrag (Teil 12, "Nutze die tiles so, das eins für 3x3 genutzt wird ... für den Weg nehmen wir
+  // nur ground_r2c1 ... oben nehmen wir die mitte von ground_r1c2 und ground_r1c3 im wechsel"):
+  // Terrain-Bänder oberhalb (Reihen 0..PATH_ROW-1) und unterhalb (Reihen PATH_ROW+1..LANE_ROWS-1) der
+  // Pfad-Reihe, je in 3-Spalten-Gruppen mit abwechselnder Kachel gezeichnet - siehe
+  // MP_GROUND_BAND_TILES/MP_BAND_GROUPS/mpDrawGroundTileBand() weiter oben. Vollständiger Fallback
+  // auf die alte Schachbrett-Optik pro Zelle, falls ein Bild (noch) nicht geladen ist.
+  const topRows = PATH_ROW, bottomRows = LANE_ROWS - PATH_ROW - 1;
+  MP_BAND_GROUPS.forEach((g, i) => {
+    const tileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
+    const gx = g.c0 * CELL, gw = g.cols * CELL;
+    if (topRows > 0 && !mpDrawGroundTileBand(ctx, tileKey, gx, 0, gw, topRows * CELL)) {
+      for (let r = 0; r < topRows; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
+        ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
+        ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+      }
     }
-  }
-  // Weg (gerade Ost-West-Strecke über die volle Breite, siehe MP_PATH_TILE_KEY weiter oben) - wird
-  // wie in SP (Teil 6) über den Gelände-Hintergrund gezeichnet.
+    if (bottomRows > 0) {
+      const by = (PATH_ROW + 1) * CELL;
+      if (!mpDrawGroundTileBand(ctx, tileKey, gx, by, gw, bottomRows * CELL)) {
+        for (let r = PATH_ROW + 1; r < LANE_ROWS; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
+          ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
+          ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+        }
+      }
+    }
+  });
+  // Weg (gerade Ost-West-Strecke über die volle Breite): nur noch `ground_r2c1`, pro Spalte exakt
+  // auf eine Zelle gezogen - wird wie zuvor über den Gelände-Hintergrund gezeichnet.
   for (let c = 0; c < LANE_COLS; c++) {
     const x = c * CELL, y = PATH_ROW * CELL;
-    if (mpDrawSprExact(ctx, MP_PATH_TILE_KEY[c], x, y, CELL, CELL)) continue;
+    if (mpDrawSprExact(ctx, 'ground_r2c1', x, y, CELL, CELL)) continue;
     ctx.fillStyle = '#3a3f47';
     ctx.fillRect(x, y, CELL, CELL);
   }
