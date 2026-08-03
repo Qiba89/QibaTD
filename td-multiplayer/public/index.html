@@ -840,17 +840,16 @@ function mpDrawSpr(ctx, key, cx, cy, targetW) {
 }
 // mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
 // expliziter Parameter (statt geschlossenem globalen ctx wie in SP) passend zum drawLane(ctx,...)-Stil.
-// Nachtrag (User-Feedback "Sprites sollen auf der x-Achse aufliegen, damit es aussieht als würden
-// sie auf dem Weg laufen"): (cx,cy) war bisher der Bild-MITTELPUNKT (cy - h/2) - dadurch "schweben"
-// höhere/breitere Sprites frei um den Weg-Punkt statt mit den Füßen darauf zu stehen. Jetzt ist
-// (cx,cy) der FUSSPUNKT (cy - h, also Bild oberhalb von cy) - horizontal bleibt cx weiterhin die
-// Bildmitte (cx - targetW/2), nur vertikal wird nicht mehr zentriert, sondern am Boden verankert.
+// (Nachtrag rückgängig gemacht, 2026-08-03: Boden-Anker "auf der x-Achse aufliegend" sah in der
+// Praxis nicht gut aus - User-Feedback "mach die einheiten wieder dahin wo sie waren". (cx,cy) ist
+// wieder der Bild-MITTELPUNKT wie ursprünglich; die gewünschte kompaktere Optik kommt jetzt über eine
+// kleinere targetW an den Aufrufstellen, siehe dort.)
 function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
@@ -2267,7 +2266,9 @@ function drawLane(ctx, structures, units, projectiles) {
     // gedeckelten) bossIndex, alle anderen Einheiten wie bisher MP_UNIT_VISUAL_KIND[u.key] + u.tier.
     const visKind = u.isBoss ? 'boss' : MP_UNIT_VISUAL_KIND[u.key];
     const visLevel = u.isBoss ? (u.bossIndex || 1) : Math.max(1, Math.min(10, u.tier || 0));
-    const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6);
+    // Nachtrag (User-Feedback, 2026-08-03: "Skalierung auf 80% von der aktuellen Größe"): ×0.8 auf
+    // die bisherige Zielbreite, statt (verworfener Versuch) den Boden-Anker zu ändern.
+    const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6) * 0.8;
     // Nachtrag (User-Feedback "Flugeinheiten sollen ein halbes Feld höher dargestellt werden"):
     // drawY statt u.y für alles Sichtbare (Sprite/Kreis-Fallback/Flieger-Ring/Level-Stern) - u.y
     // selbst bleibt unverändert (Spiellogik/Kollision/Weg-Position), nur die Darstellung wird für
@@ -2505,16 +2506,16 @@ function drawSprCover(key, dx, dy, dw, dh) {
 // ENEMY_WALK_TYPES oben). Horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3)
 // kommt aus dem globalen `walkAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf.
 // vervielfachten Spielgeschwindigkeit - siehe updateEffects()).
-// Nachtrag (User-Feedback "Sprites sollen auf der x-Achse aufliegen, damit es aussieht als würden
-// sie auf dem Weg laufen", analog zum Multiplayer-Pendant mpDrawWalkAnim()): (cx,cy) ist jetzt der
-// Fußpunkt (cy - h) statt der Bildmittelpunkt (cy - h/2) - horizontal bleibt cx weiterhin die
-// Bildmitte.
+// (Nachtrag rückgängig gemacht, 2026-08-03, analog zum Multiplayer-Pendant mpDrawWalkAnim(): der
+// Boden-Anker-Versuch sah in der Praxis nicht gut aus - User-Feedback "mach die einheiten wieder
+// dahin wo sie waren". (cx,cy) ist wieder der Bildmittelpunkt; kompaktere Optik kommt jetzt über
+// eine kleinere targetW an den Aufrufstellen.)
 function drawWalkAnim(key, cx, cy, targetW, frameIdx) {
   const rec = SPR[key];
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // Deterministische Pseudo-Zufallszahl aus (c,r) - für die feste Deko-Platzierung (Bäume/Zelte) auf
@@ -3528,11 +3529,13 @@ function draw() {
     // der Wellenzahl, siehe makeWaveEnemies()) wählt die Stärke-Ausbaustufe. Bosse nutzen stattdessen
     // bossIndex (1-10, zyklisch pro Boss-Welle) für 10 unterschiedliche Boss-Charaktere. Fallback auf
     // den bisherigen Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
+    // Nachtrag (User-Feedback, 2026-08-03: "Skalierung auf 80% von der aktuellen Größe"): ×0.8 auf
+    // die bisherige Zielbreite, analog zum Multiplayer-Pendant.
     let spriteDrawn = false;
     if (e.isBoss) {
-      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, drawY, e.radius * 3.4, walkAnimFrame);
+      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, drawY, e.radius * 3.4 * 0.8, walkAnimFrame);
     } else if (e.visualKind) {
-      spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, drawY, e.radius * 2.8, walkAnimFrame);
+      spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, drawY, e.radius * 2.8 * 0.8, walkAnimFrame);
     }
     if (!spriteDrawn) {
       ctx.beginPath();
