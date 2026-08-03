@@ -288,6 +288,18 @@
     border-radius: 10px;
     border: 2px solid #2c333c;
     cursor: pointer;
+    /* Nachtrag (Teil 8, "Spiel doppelt so groß"): das Canvas-Element selbst ist jetzt 1440×960px
+       (siehe HTML-Attribute + CELL/VSCALE in der SP-IIFE) - deutlich breiter als viele Laptop-
+       Viewports. Ohne diese Regel würde der Browser das Canvas stur in seiner vollen Pixelgröße
+       rendern und links/rechts über den Bildschirmrand hinaus abschneiden (per Flexbox-
+       Zentrierung sogar unerreichbar per Scrollen). `width: min(1440px, 96vw)` + `height: auto`
+       skaliert das Canvas nur bei Bedarf CSS-seitig auf die verfügbare Fensterbreite herunter
+       (Seitenverhältnis 3:2 bleibt erhalten) - die interne Zeichenauflösung bleibt immer die
+       vollen 1440×960px, das Bild wird also nie unnötig unscharf, nur auf kleinen Fenstern kleiner
+       dargestellt.
+    */
+    width: min(1440px, 96vw);
+    height: auto;
   }
   #singleplayerMode .sp-panel {
     background: var(--panel);
@@ -571,7 +583,7 @@
 
 <div class="sp-layout">
   <div class="sp-canvas-col">
-    <canvas id="spGameCanvas" width="720" height="480"></canvas>
+    <canvas id="spGameCanvas" width="1440" height="960"></canvas>
     <div id="spWaveBig">Welle <span id="spWaveBigNum">1</span></div>
     <!-- Nachtrag (Popup-Entfernung): ersetzt das alte #spUpgradeOverlay-Banner. Reiner Fließtext,
          kein Klick nötig, blockiert nie die Sicht aufs Feld - Wellen-Abrechnung und Countdown zur
@@ -2089,9 +2101,34 @@ function hideEndOverlay() {
 
 const canvas = document.getElementById('spGameCanvas');
 const ctx = canvas.getContext('2d');
-const CELL = 40;
+// Nachtrag (Teil 8, auf Nutzeranfrage "mit den ganzen Bildern und map tiles ... machen wir das
+// Spiel doppelt so groß, damit man auch was sieht"): CELL war ursprünglich 40 - bei den
+// hochauflösenden eigenen Kacheln/Sprites (z.B. die 180×180px-Wege-Kacheln aus Teil 6/7) ging beim
+// Herunterskalieren auf nur 40px pro Feld viel Bilddetail verloren. Jetzt CELL=80 (Canvas
+// entsprechend 1440×960 statt 720×480, siehe HTML). `VSCALE` = Verhältnis zum ursprünglichen
+// Referenzwert 40 - alle Stellen im Code, die eine feste Pixelgröße/-distanz für das ursprüngliche
+// CELL=40-Raster fest verdrahtet hatten (Gegner-/Turm-Zeichenradien, Trefferpartikel, Healthbar,
+// fliegende Schadenszahl, sowie SP_TOWER_TYPES.range/splash/projSpeed aus balance-singleplayer.js,
+// siehe unten), werden EINMALIG mit VSCALE hochskaliert - damit ändert sich NUR die Optik, nicht die
+// tatsächliche Balance (Reichweite in Spielfeldern, Projektil-Tempo relativ zur Zelle usw. bleiben
+// exakt wie zuvor). `pathCells`/`WAY_TILE_VARIANTS`/`ROAD_TILE_INFO` brauchen keine Anpassung, da sie
+// ausschließlich in Grid-Koordinaten (c,r) rechnen, nicht in Pixeln - CELL/COLS/ROWS unten bleiben
+// die einzige Quelle der Wahrheit fürs Pixel-Mapping.
+const CELL = 80;
+const VSCALE = CELL / 40;
 const COLS = canvas.width / CELL;
 const ROWS = canvas.height / CELL;
+// SP_TOWER_TYPES kommt aus js/balance-singleplayer.js (lädt als eigenes <script> VOR diesem Block,
+// siehe HTML) - `range`/`splash`/`projSpeed` sind dort für CELL=40 kalibriert und ausführlich
+// dokumentiert (z.B. "range: 60 = 1,5 Feld"). Statt jeden Wert dort von Hand zu verdoppeln (und die
+// Dokumentation/Herleitung dort ungültig zu machen), einmalig hier mit VSCALE hochskalieren - die
+// Kommentare in balance-singleplayer.js bleiben so weiterhin exakt gültig als "Basis-Werte bei
+// CELL=40", nur die tatsächlich im Spiel genutzten Werte sind schon mal mit VSCALE multipliziert.
+Object.values(SP_TOWER_TYPES).forEach(t => {
+  if (t.range != null) t.range *= VSCALE;
+  if (t.splash != null) t.splash *= VSCALE;
+  if (t.projSpeed != null) t.projSpeed *= VSCALE;
+});
 
 // ── Eigene Sprites des Nutzers (Nachtrag, "Steampunk Carnival"-Thema, NUR Endlos-Modus) ────────────
 // Anders als das zuvor wieder entfernte generische Gratis-Paket: hier hat der Nutzer selbst
@@ -2102,12 +2139,31 @@ const ROWS = canvas.height / CELL;
 // fällt automatisch auf den alten prozeduralen Look zurück, falls ein Bild (noch) nicht da ist.
 // Nachtrag ("wild durcheinander"-Fix): terrain_construction/terrain_flowerbeds und road_4 wurden
 // entfernt - die Terrain-Zufallsmischung ist einer einheitlichen Gras-Fläche gewichen (siehe unten,
-// "Rest = Wiese") und road_4 (Kreuzung) wird durch die jetzt richtungsabhängig gedrehte road_1-Kurve
-// ersetzt (siehe ROAD_TILE_INFO unten) - beide Dateien bleiben unangetastet in assets/, falls sie
-// später wieder gebraucht werden.
+// "Rest = Wiese"). road_4 (Kreuzung) und road_1 (einzelne Kurve, per Rotation an alle 4 Ecktypen
+// angepasst) sind mittlerweile komplett durch das echte Wege-Kachelset (way_*, siehe WAY_TILE_VARIANTS
+// unten, docs/tileset.md und docs/visuals.md Teil 6) ersetzt - beide alten Dateien bleiben
+// unangetastet in assets/, falls sie später wieder gebraucht werden.
 const ASSET_FILES = {
-  terrain_grass: 'terrain_grass.png', terrain_cobblestone: 'terrain_cobblestone.png',
-  road_1: 'road_1.png',
+  // Nachtrag (Teil 7, "auch das Gelände tauschen, alte tiles verwerfen"): terrain_grass/
+  // terrain_cobblestone/road_1 (Teil 3/5) sowie terrain_dirt/terrain_construction/
+  // terrain_flowerbeds/road_2..6/boss_monkey_hero (nie genutztes Alt-Material) sind komplett
+  // entfernt - weder referenziert noch noch als Datei in assets/ vorhanden. Neuer Hintergrund:
+  // terrain_plaza (aus map_tileset/gelaende/, Originaldatei "gelände 2.png" - siehe docs/tileset.md,
+  // "Warum EIN Hintergrundbild statt Einzelkacheln").
+  terrain_plaza: 'terrain_plaza.png',
+  // Nachtrag (Teil 6, "richtige Kurven + Logik fürs Zusammenpassen"): echtes modulares Wege-Kachelset
+  // aus map_tileset/wege/ - für jedes Kachel-"Sockel-Muster" (welche Kanten N/E/S/W den Pfad
+  // berühren) gibt es 1-2 optisch leicht unterschiedliche Varianten (way_..._a/_b), damit eine lange
+  // gerade Strecke nicht komplett identisch aussieht. Sockel-Muster wurden NICHT geschätzt, sondern
+  // durch direkte Sichtprüfung jeder Einzelkachel (mit eingeblendeten Kantenmarkierungen) bestimmt -
+  // siehe docs/tileset.md, Abschnitt "Sockel-Analyse (Teil 6)".
+  way_ns_a: 'way_ns_a.png', way_ns_b: 'way_ns_b.png',                 // gerade, Nord-Süd
+  way_ew_a: 'way_ew_a.png', way_ew_b: 'way_ew_b.png',                 // gerade, Ost-West
+  way_curve_ne: 'way_curve_ne.png',                                    // Kurve Nord-Ost
+  way_curve_nw_a: 'way_curve_nw_a.png', way_curve_nw_b: 'way_curve_nw_b.png', // Kurve Nord-West
+  way_curve_es_a: 'way_curve_es_a.png', way_curve_es_b: 'way_curve_es_b.png', // Kurve Ost-Süd
+  way_curve_sw_a: 'way_curve_sw_a.png', way_curve_sw_b: 'way_curve_sw_b.png', // Kurve Süd-West
+  way_junction_esw: 'way_junction_esw.png',                            // T-Kreuzung Ost-Süd-West (für künftige verzweigte Maps)
   obj_tent1: 'obj_tent1.png', obj_tent2: 'obj_tent2.png', obj_lamppost: 'obj_lamppost.png', obj_tree: 'obj_tree.png',
   tower_arrow_L1: 'tower_arrow_L1.png', tower_arrow_L2: 'tower_arrow_L2.png', tower_arrow_L3: 'tower_arrow_L3.png',
   tower_arrow_L4: 'tower_arrow_L4.png', tower_arrow_L5: 'tower_arrow_L5.png',
@@ -2153,6 +2209,26 @@ function drawSprExact(key, dx, dy, dw, dh) {
   ctx.drawImage(rec.img, dx, dy, dw, dh);
   return true;
 }
+// drawSprCover(): zeichnet EIN großes Bild als Hintergrund über das gesamte übergebene Rechteck,
+// wie CSS "background-size: cover" - Seitenverhältnis bleibt gewahrt, das Bild wird mittig
+// beschnitten (nicht verzerrt), falls sein Seitenverhältnis nicht exakt zum Zielrechteck passt.
+// Nachtrag (Teil 7, "auch das Gelände tauschen"): fürs neue `terrain_plaza`-Hintergrundbild, das
+// als EIN Stück den ganzen Spielfeld-Boden abdeckt statt pro Zelle gekachelt zu werden - die
+// Gelände-Referenzgrafik ist ein zusammenhängendes Kachel-Raster-Motiv (Karussell-Platz mit
+// Medaillon-Mitte, siehe docs/tileset.md), keine frei wiederholbare Einzelkachel wie die Weg-Stücke.
+function drawSprCover(key, dx, dy, dw, dh) {
+  const rec = SPR[key];
+  if (!rec || !rec.ready) return false;
+  const srcAspect = rec.w / rec.h, dstAspect = dw / dh;
+  let sx, sy, sw, sh;
+  if (srcAspect > dstAspect) { // Quelle relativ breiter als Ziel -> links/rechts beschneiden
+    sh = rec.h; sw = sh * dstAspect; sx = (rec.w - sw) / 2; sy = 0;
+  } else { // Quelle relativ höher als Ziel -> oben/unten beschneiden
+    sw = rec.w; sh = sw / dstAspect; sy = (rec.h - sh) / 2; sx = 0;
+  }
+  ctx.drawImage(rec.img, sx, sy, sw, sh, dx, dy, dw, dh);
+  return true;
+}
 // drawWalkAnim(): generische 4-Frame-Lauf-Animation für JEDE Gegner-/Boss-Sprite-Stufe (ursprünglich
 // nur für den Affen-Boss geschrieben, jetzt für alle Gegnertypen×Stufen wiederverwendet - siehe
 // ENEMY_WALK_TYPES oben). Horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3)
@@ -2194,34 +2270,73 @@ const pathCells = [
 ];
 const waypoints = pathCells.map(([c,r]) => ({x: c*CELL + CELL/2, y: r*CELL + CELL/2}));
 const pathSet = new Set(pathCells.map(([c,r]) => `${c},${r}`));
-// Nachtrag (auf Nutzeranfrage "wege tiles für den Weg, für den Rest wiese - die tiles waren wild
-// durcheinander"): einmal beim Laden berechnete Richtungsinfo pro Pfad-Zelle, damit draw() bei
-// geraden Wegstücken eine einfache Steinkachel und bei Kurven die Kurven-Kachel PASSEND GEDREHT
-// zeichnen kann, statt wie vorher überall dieselbe ungedrehte Kurve zu verwenden (das sah an
-// geraden Stücken kaputt/zufällig aus). `pathCells` ist eine geordnete Folge von der Wellen-Quelle
-// bis zum Ziel - für jede Zelle ergibt der Vorgänger/Nachfolger in dieser Liste, aus welcher
-// Richtung der Weg kommt und wohin er weiterführt.
+// ── Wege-Kachel-"Logik" (Teil 6, auf Nutzeranfrage "Bau damit die Map neu ... versuche immer
+// passende tiles nebeneinander zu legen ... eine Logik hinterlegen wie die zusammen gehören sodass
+// wir einfacher neue Maps generieren können") ──────────────────────────────────────────────────────
+// Ersetzt die alte Teil-5-Lösung (eine einzige road_1-Kurve, per canvas-Rotation an alle 4 Ecken
+// angepasst, gerade Stücke = einfarbige Steinkachel ohne jede Weggrafik). Statt dessen: ein echtes
+// Sockel/Autotiling-System, analog zu "Wang tiles" - jede Pfad-Zelle bekommt ein Sockel-Muster aus
+// den Himmelsrichtungen, in denen sie an eine benachbarte Pfad-Zelle andockt (z. B. "NS" = Weg geht
+// nach oben UND unten weiter = gerades Stück; "ES" = Weg kommt von rechts UND geht nach unten weiter
+// = Kurve). Für jedes vorkommende Sockel-Muster liegt im neuen `map_tileset/wege/`-Set (siehe
+// docs/tileset.md) eine passende, durch Sichtprüfung (nicht nur geraten!) bestätigte Kachel bereit -
+// mehrere davon sogar in 2 optisch leicht unterschiedlichen Varianten für Abwechslung auf langen
+// Strecken. Der Clou: dieser Code kennt `pathCells` selbst gar nicht mehr im Detail - er liest bei
+// JEDER Zelle nur "wer sind meine Nachbarn in der Liste" aus und schlägt das passende Sockel-Muster
+// in WAY_TILE_VARIANTS nach. Eine künftige, andere `pathCells`-Route (neue Karte) wird dadurch
+// automatisch richtig gekachelt, ohne dass an diesem Code irgendetwas geändert werden müsste.
+const DIR_ORDER = ['N', 'E', 'S', 'W']; // feste Reihenfolge für den Sockel-Schlüssel, z.B. "ES"
+// Sockel-Muster -> eine oder mehrere gleichwertige Kachel-Varianten (SPR-Keys aus ASSET_FILES oben).
+// "ESW" (T-Kreuzung) wird von der aktuellen, unverzweigten `pathCells`-Route nie gebraucht, liegt
+// aber bereit, falls eine künftige Karte einen Wege-Abzweig bekommt.
+const WAY_TILE_VARIANTS = {
+  NS: ['way_ns_a', 'way_ns_b'],
+  EW: ['way_ew_a', 'way_ew_b'],
+  NE: ['way_curve_ne'],
+  NW: ['way_curve_nw_a', 'way_curve_nw_b'],
+  ES: ['way_curve_es_a', 'way_curve_es_b'],
+  SW: ['way_curve_sw_a', 'way_curve_sw_b'],
+  ESW: ['way_junction_esw'],
+};
+// Berechnet für Zelle `i` in `cells` (geordnete [c,r]-Liste wie `pathCells`) das Sockel-Muster als
+// Set aus 'N'/'E'/'S'/'W'. Anfang/Ende der Route haben nur EINEN Nachbarn (Wellen-Quelle/Ziel) - für
+// die wird die fehlende Seite auf derselben Achse künstlich dazugenommen (aus einem "nur Süden
+// offen"-Sockel wird "NS"), damit dort trotzdem ein optisch stimmiges gerades Stück liegt statt gar
+// keine passende Kachel zu finden.
+function computeWaySockets(cells, i) {
+  const [c, r] = cells[i];
+  const dirTo = (other) => {
+    if (!other) return null;
+    if (other[0] < c) return 'W';
+    if (other[0] > c) return 'E';
+    if (other[1] < r) return 'N';
+    return 'S';
+  };
+  const dirs = new Set([dirTo(cells[i - 1]), dirTo(cells[i + 1])].filter(Boolean));
+  if (dirs.size === 1) {
+    const only = dirs.values().next().value;
+    if (only === 'N' || only === 'S') { dirs.add('N'); dirs.add('S'); }
+    else { dirs.add('E'); dirs.add('W'); }
+  }
+  return dirs;
+}
+// Sockel-Set -> Schlüssel in fester DIR_ORDER-Reihenfolge (z.B. {S,E} -> "ES"), damit die Reihenfolge
+// beim Einsammeln der Richtungen keine Rolle spielt.
+function waySocketKey(dirsSet) {
+  return DIR_ORDER.filter(d => dirsSet.has(d)).join('');
+}
+// Einmal pro Pfad-Zelle vorberechnet: Sockel-Schlüssel + (deterministisch, nicht pro Frame neu
+// gewürfelt) ausgewählte Varianten-Kachel, per cellRandom() wie schon bei der Deko-Platzierung oben.
 const ROAD_TILE_INFO = new Map();
 pathCells.forEach(([c, r], i) => {
-  const dirs = new Set();
-  const prev = pathCells[i - 1];
-  const next = pathCells[i + 1];
-  if (prev) dirs.add(prev[0] < c ? 'left' : prev[0] > c ? 'right' : prev[1] < r ? 'up' : 'down');
-  if (next) dirs.add(next[0] < c ? 'left' : next[0] > c ? 'right' : next[1] < r ? 'up' : 'down');
-  const hasH = dirs.has('left') || dirs.has('right');
-  const hasV = dirs.has('up') || dirs.has('down');
-  let info;
-  if (hasH && hasV) {
-    // Ecke: road_1.png verbindet im Original (0°) "oben" und "links" - siehe docs/visuals.md.
-    // Rotation im Uhrzeigersinn dreht diese Verbindung entsprechend weiter.
-    if (dirs.has('up') && dirs.has('left')) info = { corner: true, rotation: 0 };
-    else if (dirs.has('up') && dirs.has('right')) info = { corner: true, rotation: 90 };
-    else if (dirs.has('down') && dirs.has('right')) info = { corner: true, rotation: 180 };
-    else info = { corner: true, rotation: 270 }; // down + left
-  } else {
-    info = { corner: false }; // gerades Stück (oder Anfang/Ende des Wegs)
+  const dirs = computeWaySockets(pathCells, i);
+  const key = waySocketKey(dirs);
+  const variants = WAY_TILE_VARIANTS[key];
+  let sprKey = null;
+  if (variants) {
+    sprKey = variants[Math.floor(cellRandom(c, r, 5) * variants.length)];
   }
-  ROAD_TILE_INFO.set(`${c},${r}`, info);
+  ROAD_TILE_INFO.set(`${c},${r}`, { key, sprKey });
 });
 
 let gold = 220;
@@ -2533,7 +2648,10 @@ function pushEnemy(list, opts) {
 function makeWaveEnemies(w) {
   const type = waveType(w);
   const hp0 = baseHp(w);
-  const speed = 1 + Math.min(w * 0.03, 1);
+  // Nachtrag (Teil 8, "Spiel doppelt so groß"): px/Frame-Tempo mit VSCALE hochskaliert, damit Gegner
+  // bei CELL=80 genauso viele Frames für dieselbe Feld-Strecke brauchen wie zuvor bei CELL=40 (sonst
+  // würden sie sich effektiv doppelt so schnell bewegen, weil jedes Feld jetzt doppelt so breit ist).
+  const speed = (1 + Math.min(w * 0.03, 1)) * VSCALE;
   const kg = killGoldBase(w);
   const list = [];
   // Nachtrag (auf Nutzeranfrage "Ab runde 25 bekommen die gegner einen schild der einen Hit abhält
@@ -2553,19 +2671,19 @@ function makeWaveEnemies(w) {
     const cnt = Math.round(baseCount(w) * SWARM_COUNT_MULT);
     const hp = hp0 * SWARM_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits, visualKind: 'sprinter', visualLevel });
+      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8 * VSCALE, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits, visualKind: 'sprinter', visualLevel });
     }
   } else if (type === 'relief') {
     const cnt = baseCount(w);
     const hp = hp0 * POST_BOSS_RELIEF_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits, visualKind: 'brecher', visualLevel });
+      pushEnemy(list, { hp, speed, radius: 10 * VSCALE, color: '#7cd992', reward: Math.round(kg), shieldHits, visualKind: 'brecher', visualLevel });
     }
   } else if (type === 'boss') {
     const cnt = Math.round(baseCount(w) * 0.7);
     const escortHp = hp0 * BOSS_ESCORT_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits, visualKind: 'brecher', visualLevel });
+      pushEnemy(list, { hp: escortHp, speed, radius: 10 * VSCALE, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits, visualKind: 'brecher', visualLevel });
     }
     // Boss spawns last -> arrives at the end of the wave
     // Nachtrag (Steampunk-Carnival-Sprites): bossIndex zyklisch 1-10 ueber die Boss-Wellen (w%5===0),
@@ -2574,7 +2692,7 @@ function makeWaveEnemies(w) {
     // Figur, sondern 10 verschiedene Charaktere (Affe, Hund, Eule, Kanonenwagen, ...).
     const bIdx = ((Math.floor(w / 5) - 1) % 10) + 1;
     const bHp = Math.round(hp0 * bossMult(w));
-    pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits, bossIndex: bIdx });
+    pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24 * VSCALE, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits, bossIndex: bIdx });
   } else if (type === 'flying') {
     // Flieger-Welle (Nachtrag): ab Welle 12, alle 10 Wellen (siehe waveType() in
     // balance-singleplayer.js). Boden-Türme (Pfeil/Kanone/Titan) können diese Gegner nur zum
@@ -2585,12 +2703,12 @@ function makeWaveEnemies(w) {
     // Gleiche Anzahl wie eine normale Welle (baseCount(w)).
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits, visualKind: 'flugeinheit', visualLevel });
+      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9 * VSCALE, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits, visualKind: 'flugeinheit', visualLevel });
     }
   } else { // normal
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits, visualKind: 'guard', visualLevel });
+      pushEnemy(list, { hp: hp0, speed, radius: 10 * VSCALE, color: '#ff5e5e', reward: Math.round(kg), shieldHits, visualKind: 'guard', visualLevel });
     }
   }
 
@@ -2695,7 +2813,9 @@ document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(btn => {
 function spawnParticles(x, y, color, count, opts) {
   opts = opts || {};
   const spread = opts.spread || 1;
-  const baseSpeed = opts.speed || 0.09;
+  // Nachtrag (Teil 8, "Spiel doppelt so groß"): * VSCALE, damit Partikel bei CELL=80 optisch genauso
+  // weit relativ zur (jetzt größeren) Zelle auseinanderfliegen wie zuvor bei CELL=40.
+  const baseSpeed = (opts.speed || 0.09) * VSCALE;
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
     const speed = (baseSpeed * 0.4 + Math.random() * baseSpeed) * spread;
@@ -2706,12 +2826,12 @@ function spawnParticles(x, y, color, count, opts) {
       life: 260 + Math.random() * 220,
       maxLife: 480,
       color,
-      size: 1.5 + Math.random() * 2,
+      size: (1.5 + Math.random() * 2) * VSCALE,
     });
   }
 }
 function spawnFloatingText(x, y, text, color) {
-  floatingTexts.push({ x, y: y - 10, text, color: color || '#fff', life: 650, maxLife: 650, vy: -0.028 });
+  floatingTexts.push({ x, y: y - 10 * VSCALE, text, color: color || '#fff', life: 650, maxLife: 650, vy: -0.028 * VSCALE });
 }
 function triggerShake(mag) {
   screenShake.time = Math.max(screenShake.time, 140);
@@ -2858,7 +2978,7 @@ function update(dt) {
         // Verteidigung T2 Schild: blockt einen kompletten Leak (wie im Multiplayer "3 Treffer
         // abfangen" — ein Treffer = eine Ladung, unabhängig von der eigentlichen Lebenskosten-Höhe).
         if (shieldCharges > 0) { shieldCharges--; }
-        else { lives -= (e.isBoss ? 5 : (e.radius > 12 ? 3 : 1)); }
+        else { lives -= (e.isBoss ? 5 : (e.radius > 12 * VSCALE ? 3 : 1)); }
         enemies = enemies.filter(en => en !== e);
         updateStats();
         if (lives <= 0) { endGame(); }
@@ -2927,13 +3047,13 @@ function update(dt) {
     if (!enemies.includes(p.target)) { p.dead = true; return; }
     const dx = p.target.x - p.x, dy = p.target.y - p.y;
     const dist = Math.hypot(dx, dy);
-    if (dist < p.speed + 5) {
+    if (dist < p.speed + 5 * VSCALE) {
       if (p.splash) {
         enemies.slice().forEach(e => {
           if (Math.hypot(e.x - p.target.x, e.y - p.target.y) <= p.splash) damageEnemy(e, p.damage);
         });
         // Kleiner Kamera-Zittereffekt bei Flächenschaden (rein optisch) - macht AoE-Treffer spürbarer.
-        triggerShake(2.5);
+        triggerShake(2.5 * VSCALE);
         spawnParticles(p.target.x, p.target.y, '#ffb347', 8, { speed: 0.11, spread: 1.2 });
       } else if (p.chainJumps) {
         // Tesla-Kettenblitz: erster Treffer beim Primärziel, danach springt der Schaden vom jeweils
@@ -2985,17 +3105,21 @@ function draw() {
   // Nachtrag (Steampunk-Carnival-Sprites, eigene Grafiken des Nutzers): Terrain-/Pfad-Zellen nutzen
   // jetzt, falls geladen, echte Kachel-Grafiken statt der Schachbrett-/Verlauf-Optik - mit
   // vollständigem Fallback auf den bisherigen Look, falls ein Bild (noch) nicht bereit ist. Der
-  // Pfad-Set (`pathSet`) wird einmal vorab gebaut, damit die Terrain-Schleife pro Zelle nur einen
-  // schnellen Set-Lookup statt einer linearen pathCells-Suche braucht.
+  // Pfad-Set (`pathSet`) wird einmal vorab gebaut (u.a. für die Deko-Streuung unten).
   const pathSet = new Set(pathCells.map(([c,r]) => c + ',' + r));
-  // Nachtrag (auf Nutzeranfrage "die tiles waren wild durcheinander... für den Rest Wiese"): nur
-  // noch Gras für alle Nicht-Weg-Zellen, statt eines zufälligen Mixes aus Gras/Kopfstein/Baustelle/
-  // Blumenbeet - der Materialwechsel wirkte unruhig/planlos. Klar getrennt: Weg = Steinkacheln
-  // (siehe unten), alles andere = durchgehend Gras.
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
-      if (pathSet.has(c + ',' + r)) continue; // Pfad-Zellen werden unten separat gezeichnet
-      if (!drawSprExact('terrain_grass', c*CELL, r*CELL, CELL, CELL)) {
+  // Nachtrag (Teil 7, "auch das Gelände tauschen"): EIN großes Hintergrundbild (`terrain_plaza`)
+  // deckt jetzt den kompletten Boden ab, statt pro Zelle eine Kachel zu wiederholen (siehe Teil 5,
+  // "nur noch Gras"). Grund: die neue Gelände-Referenzgrafik ist - anders als das Weg-Set aus Teil 6
+  // - KEIN Satz frei kombinierbarer Einzelkacheln, sondern EIN zusammenhängendes Motiv (Karussell-
+  // Platz mit Medaillon-Mitte über alle 15 Raster-Felder hinweg, siehe docs/tileset.md). Einzelne
+  // Ausschnitte davon isoliert zu wiederholen hätte an jeder Kachelgrenze sichtbar kaputte
+  // Gear-/Medaillon-Fragmente ergeben. `drawSprCover()` skaliert das Bild wie CSS "background-size:
+  // cover" auf die komplette Spielfeld-Fläche (COLS×CELL / ROWS×CELL) - Seitenverhältnis bleibt
+  // gewahrt, minimaler Beschnitt links/rechts statt Verzerrung. Pfad-Kacheln (Teil 6) und
+  // Deko-Objekte werden wie bisher obendrüber gezeichnet.
+  if (!drawSprCover('terrain_plaza', 0, 0, COLS * CELL, ROWS * CELL)) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
         ctx.fillStyle = (r+c)%2===0 ? '#232a33' : '#212831';
         ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
       }
@@ -3015,27 +3139,16 @@ function draw() {
       }
     }
   }
-  // path (Nachtrag, visuelle Aufwertung: statt einer flachen Einheitsfarbe jetzt ein Verlauf +
-  // dezente helle Kante, damit der Weg mehr wie ein befestigter Pfad statt wie eine einfarbige
-  // Zellauswahl wirkt - siehe docs/visuals.md; Nachtrag "wild durcheinander"-Fix: an Kurven wird die
-  // road_1-Kachel jetzt passend gedreht (siehe ROAD_TILE_INFO oben), an geraden Stücken eine
-  // schlichte Steinkachel (dasselbe Material wie die Kurve, aber ohne die Schienen-Grafik, die dort
-  // fehl am Platz wirkt) - beides mit Fallback auf den alten Verlauf, falls Bilder fehlen.
+  // path (Teil 6, "richtige Kurven + Logik fürs Zusammenpassen"): jede Pfad-Zelle zeichnet die zu
+  // ihrem Sockel-Muster passende way_*-Kachel aus WAY_TILE_VARIANTS (vorberechnet in ROAD_TILE_INFO,
+  // siehe oben) - keine canvas-Rotation mehr nötig, jede Kurvenrichtung hat ihre eigene, per
+  // Sichtprüfung bestätigte Bilddatei. Fallback auf den alten Verlauf, falls ein Bild (noch) nicht
+  // geladen ist oder (bei künftigen, verzweigten Karten) ein Sockel-Muster mal keine passende Kachel
+  // im aktuellen Set findet.
   pathCells.forEach(([c,r]) => {
     const x = c*CELL, y = r*CELL;
     const info = ROAD_TILE_INFO.get(c + ',' + r);
-    let drawn;
-    if (info && info.corner) {
-      ctx.save();
-      ctx.translate(x + CELL / 2, y + CELL / 2);
-      ctx.rotate(info.rotation * Math.PI / 180);
-      const rec = SPR.road_1;
-      drawn = rec && rec.ready;
-      if (drawn) ctx.drawImage(rec.img, -CELL / 2, -CELL / 2, CELL, CELL);
-      ctx.restore();
-    } else {
-      drawn = drawSprExact('terrain_cobblestone', x, y, CELL, CELL);
-    }
+    const drawn = info && info.sprKey && drawSprExact(info.sprKey, x, y, CELL, CELL);
     if (drawn) return;
     const grad = ctx.createLinearGradient(x, y, x, y + CELL);
     grad.addColorStop(0, '#454b54');
@@ -3063,7 +3176,7 @@ function draw() {
   // towers (Türme mit footprint>1, aktuell nur der Titan-Turm, entsprechend größer gezeichnet,
   // damit das belegte 2×2-Baufeld optisch erkennbar bleibt)
   towers.forEach(t => {
-    const radius = 14 + ((t.footprint || 1) - 1) * 10;
+    const radius = (14 + ((t.footprint || 1) - 1) * 10) * VSCALE;
     if ((t.footprint || 1) > 1) {
       // Belegtes Baufeld sichtbar umranden, damit klar ist, welche Nachbarzellen dadurch blockiert sind.
       ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -3148,7 +3261,7 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2;
-      ctx.arc(e.x, e.y, e.radius + 3, 0, Math.PI*2);
+      ctx.arc(e.x, e.y, e.radius + 3 * VSCALE, 0, Math.PI*2);
       ctx.stroke();
     }
     // Schild-Kennzeichnung (Nachtrag, auf Nutzeranfrage "zeig den schild als Blauen Rahmen, leicht
@@ -3161,16 +3274,16 @@ function draw() {
       ctx.beginPath();
       ctx.strokeStyle = '#60a5fa';
       ctx.lineWidth = 2.5;
-      ctx.arc(e.x, e.y, e.radius + (e.flying ? 6 : 3), 0, Math.PI*2);
+      ctx.arc(e.x, e.y, e.radius + (e.flying ? 6 : 3) * VSCALE, 0, Math.PI*2);
       ctx.stroke();
       ctx.restore();
     }
     // hp bar
     const w = e.radius*2;
     ctx.fillStyle = '#000';
-    ctx.fillRect(e.x - w/2, e.y - e.radius - 8, w, 4);
+    ctx.fillRect(e.x - w/2, e.y - e.radius - 8 * VSCALE, w, 4 * VSCALE);
     ctx.fillStyle = '#7CFC00';
-    ctx.fillRect(e.x - w/2, e.y - e.radius - 8, w * (e.hp/e.maxHp), 4);
+    ctx.fillRect(e.x - w/2, e.y - e.radius - 8 * VSCALE, w * (e.hp/e.maxHp), 4 * VSCALE);
   });
 
   // projectiles (Nachtrag, visuelle Aufwertung: kurzer verblassender Bewegungs-Trail statt eines
@@ -3190,7 +3303,7 @@ function draw() {
 
     ctx.beginPath();
     ctx.fillStyle = p.color;
-    ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
+    ctx.arc(p.x, p.y, 4 * VSCALE, 0, Math.PI*2);
     ctx.fill();
   });
 
@@ -3207,7 +3320,7 @@ function draw() {
   // Nachtrag (visuelle Aufwertung): fliegende Schadenszahlen (spawnFloatingText(), siehe damageEnemy()).
   floatingTexts.forEach(f => {
     ctx.globalAlpha = Math.max(0, f.life / f.maxLife);
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold ' + (13 * VSCALE) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.8)';
@@ -3283,7 +3396,10 @@ function updateTowerInfoPanel() {
     document.getElementById('spPrioFirstBtn').classList.toggle('sp-active', t.priority !== 'hp');
     document.getElementById('spPrioHpBtn').classList.toggle('sp-active', t.priority === 'hp');
   }
-  document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t)) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t))}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
+  // Nachtrag (Teil 8, "Spiel doppelt so groß"): Anzeige durch VSCALE geteilt, damit die "px"-Zahl im
+  // Info-Panel unverändert bleibt (bezieht sich weiterhin auf das ursprüngliche CELL=40-Bezugssystem)
+  // - die tatsächliche Feld-Abdeckung ist exakt dieselbe wie vor Teil 8, nur optisch größer gezeichnet.
+  document.getElementById('spTiRange').textContent = Math.round(spEffectiveRange(t) / VSCALE) + ' px' + (t.baseSplash ? ` (AoE ${Math.round(effectiveSplash(t) / VSCALE)}px)` : '') + (t.type === 'tesla' ? ` (Kette ×${teslaChainJumps(t.tier)})` : '');
   const upgradeBtn = document.getElementById('spTiUpgradeBtn');
   if (maxed) {
     upgradeBtn.textContent = 'Max. Tier erreicht';
