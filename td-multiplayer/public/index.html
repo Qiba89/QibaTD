@@ -519,12 +519,12 @@
   <div class="lanes" style="display:none;">
     <div class="lane-block">
       <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
-      <canvas id="myCanvas" width="2720" height="640"></canvas>
+      <canvas id="myCanvas" width="1360" height="320"></canvas>
       <div class="flash-overlay" id="myFlash"></div>
     </div>
     <div class="lane-block">
       <div class="lane-label">🎯 Gegner-Verteidigung — hierhin schickst du Einheiten</div>
-      <canvas id="oppCanvas" width="2720" height="640"></canvas>
+      <canvas id="oppCanvas" width="1360" height="320"></canvas>
       <div class="flash-overlay" id="oppFlash"></div>
     </div>
   </div>
@@ -666,7 +666,7 @@
 // Balancing-Werte (Türme, Einheiten, Bosse, Tech-Tree, Tier-Skalierung)
 // stecken jetzt in js/balance-shared.js und js/balance-multiplayer.js
 // (siehe <script>-Tags oben) statt inline hier — siehe docs/balancing.md.
-const CELL = 160;
+const CELL = 80;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
@@ -2223,7 +2223,7 @@ function drawLane(ctx, structures, units, projectiles) {
     // vollständiger Fallback auf die bisherige Kreis-Optik, falls Bild (noch) nicht geladen ist oder
     // die Turmart keinen Sprite-Satz hat (tesla/mine).
     const spritePrefix = MP_TOWER_SPRITE_PREFIX[t.type];
-    const spriteDrawn = spritePrefix && mpDrawSpr(ctx, spritePrefix + '_L' + mpTowerSpriteStage(t.tier), t.x, t.y, radius * 2.6);
+    const spriteDrawn = spritePrefix && mpDrawSpr(ctx, spritePrefix + '_L' + mpTowerSpriteStage(t.tier), t.x, t.y, radius * 5.2);
     if (!spriteDrawn) {
       ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
@@ -2244,7 +2244,7 @@ function drawLane(ctx, structures, units, projectiles) {
     // bisherige Kreis-Optik, falls Bild (noch) nicht geladen oder u.key keiner Kategorie zugeordnet ist.
     const visKind = MP_UNIT_VISUAL_KIND[u.key];
     const visLevel = Math.max(1, Math.min(10, u.tier || 0));
-    const targetW = u.radius * (visKind === 'boss' ? 3.4 : 2.8);
+    const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6);
     const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, u.y, targetW, mpWalkAnimFrame);
     if (!spriteDrawn) {
       ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
