@@ -2092,6 +2092,79 @@ const ctx = canvas.getContext('2d');
 const CELL = 40;
 const COLS = canvas.width / CELL;
 const ROWS = canvas.height / CELL;
+
+// ── Eigene Sprites des Nutzers (Nachtrag, "Steampunk Carnival"-Thema, NUR Endlos-Modus) ────────────
+// Anders als das zuvor wieder entfernte generische Gratis-Paket: hier hat der Nutzer selbst
+// individuelle, freigestellte PNGs bereitgestellt (assets/*.png) - siehe docs/visuals.md für die
+// Herkunft (aus einem größeren Referenz-Moodboard zugeschnitten + Karo-Hintergrund entfernt) und für
+// welche Elemente bewusst NICHT übernommen wurden (die 5 anderen Turmtypen - siehe dort, Abschnitt
+// "Was noch offen ist"). Jedes Bild lädt einzeln und asynchron; jede Zeichenstelle prüft `ready` und
+// fällt automatisch auf den alten prozeduralen Look zurück, falls ein Bild (noch) nicht da ist.
+const ASSET_FILES = {
+  enemy_sprinter: 'enemy_sprinter.png', enemy_guard: 'enemy_guard.png',
+  enemy_brecher: 'enemy_brecher.png', enemy_flugeinheit: 'enemy_flugeinheit.png',
+  boss_monkey_walk: 'boss_monkey_walk.png',
+  boss_L2: 'boss_L2.png', boss_L3: 'boss_L3.png', boss_L4: 'boss_L4.png', boss_L5: 'boss_L5.png',
+  boss_L6: 'boss_L6.png', boss_L7: 'boss_L7.png', boss_L8: 'boss_L8.png', boss_L9: 'boss_L9.png', boss_L10: 'boss_L10.png',
+  terrain_grass: 'terrain_grass.png', terrain_cobblestone: 'terrain_cobblestone.png',
+  terrain_construction: 'terrain_construction.png', terrain_flowerbeds: 'terrain_flowerbeds.png',
+  road_1: 'road_1.png', road_4: 'road_4.png',
+  obj_tent1: 'obj_tent1.png', obj_tent2: 'obj_tent2.png', obj_lamppost: 'obj_lamppost.png', obj_tree: 'obj_tree.png',
+  tower_arrow_L1: 'tower_arrow_L1.png', tower_arrow_L2: 'tower_arrow_L2.png', tower_arrow_L3: 'tower_arrow_L3.png',
+  tower_arrow_L4: 'tower_arrow_L4.png', tower_arrow_L5: 'tower_arrow_L5.png',
+};
+const SPR = {};
+Object.keys(ASSET_FILES).forEach(key => {
+  const img = new Image();
+  const rec = { img, ready: false, w: 0, h: 0 };
+  img.onload = () => { rec.ready = true; rec.w = img.naturalWidth; rec.h = img.naturalHeight; };
+  img.onerror = () => { rec.ready = false; };
+  img.src = 'assets/' + ASSET_FILES[key];
+  SPR[key] = rec;
+});
+// drawSpr(): zentriert auf (cx,cy), Zielbreite `targetW`, Seitenverhältnis bleibt erhalten (fürs
+// Charakter-Artwork - Verzerrung würde dort auffallen). Gibt false zurück, solange nicht geladen.
+function drawSpr(key, cx, cy, targetW) {
+  const rec = SPR[key];
+  if (!rec || !rec.ready) return false;
+  const h = targetW * (rec.h / rec.w);
+  ctx.drawImage(rec.img, cx - targetW / 2, cy - h / 2, targetW, h);
+  return true;
+}
+// drawSprExact(): füllt exakt das übergebene Rechteck (dx,dy,dw,dh) ohne Seitenverhältnis zu wahren -
+// für Terrain-/Weg-Kacheln, die exakt eine Spielfeld-Zelle ausfüllen sollen (die Quellkacheln sind
+// ohnehin fast quadratisch, die minimale Verzerrung fällt dort nicht auf).
+function drawSprExact(key, dx, dy, dw, dh) {
+  const rec = SPR[key];
+  if (!rec || !rec.ready) return false;
+  ctx.drawImage(rec.img, dx, dy, dw, dh);
+  return true;
+}
+// drawMonkeyWalk(): die 4-Frame-Lauf-/Trommel-Animation des ersten Bosses (Welle 5) - ein
+// horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3) kommt aus dem globalen
+// `bossAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf. vervielfachten
+// Spielgeschwindigkeit - siehe updateEffects()).
+function drawMonkeyWalk(cx, cy, targetW, frameIdx) {
+  const rec = SPR.boss_monkey_walk;
+  if (!rec || !rec.ready) return false;
+  const fw = rec.w / 4, fh = rec.h;
+  const h = targetW * (fh / fw);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  return true;
+}
+// Deterministische Pseudo-Zufallszahl aus (c,r) - für die feste Deko-Platzierung (Bäume/Zelte) auf
+// Gras-Zellen unten: dieselbe Zelle liefert bei jedem Aufruf denselben Wert, die Deko "flackert" also
+// nicht von Frame zu Frame, obwohl draw() jeden Frame komplett neu zeichnet.
+function cellRandom(c, r, salt) {
+  const x = Math.sin(c * 127.1 + r * 311.7 + salt * 74.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+// Boss-Animations-Takt (Nachtrag): läuft mit dem echten Frame-dt in updateEffects() (siehe dort),
+// bewusst getrennt von gameSpeedMultiplier - sonst würde die Trommel-Animation bei 5x/10x Tempo
+// unlesbar schnell durchrauschen, obwohl sie rein optisch ist.
+let bossAnimAccum = 0;
+let bossAnimFrame = 0;
+
 // Nachtrag (Balance-Fix, auf Nutzeranfrage, analog zum Multiplayer-Pendant): der Kettenblitz sprang
 // bisher nur innerhalb einer festen Sprungreichweite zum nächsten fliegenden Ziel - jetzt uneinge-
 // schränkt zum jeweils nächstgelegenen noch nicht getroffenen fliegenden Ziel, egal wie weit entfernt
@@ -2114,6 +2187,15 @@ let wave = 1;
 let towers = [];
 let enemies = [];
 let projectiles = [];
+// Nachtrag (visuelle Aufwertung, auf Nutzeranfrage "Kriegen wir das Spiel irgendwie ähnlich visuell
+// ansprechend hin?", Endlos-Modus): "Juice"-Effekte, die rein optisch sind und keine
+// Balance-Werte verändern - fliegende Schadenszahlen (floatingTexts), Treffer-/Todes-Partikel
+// (particles) und ein kurzer Screen-Shake bei Flächenschaden. Laufen über updateEffects(), das mit
+// dem echten Frame-dt läuft (nicht mit dem ggf. vervielfachten Spielgeschwindigkeits-dt aus update()),
+// damit Effekte bei 5x/10x Spieltempo nicht unlesbar schnell durchrauschen.
+let particles = [];
+let floatingTexts = [];
+let screenShake = { time: 0, mag: 0 };
 let selectedTowerType = null;
 let waveActive = false;
 let gameOver = false;
@@ -2391,11 +2473,15 @@ function updateStats() {
 // nicht fürs Zeichnen gebraucht, da der Schild-Rahmen nur an/aus ist, aber für spätere Abstufungen
 // nützlich). `fast: true` markiert Schwarm-/Flieger-Gegner (siehe makeWaveEnemies()) als Ziel der
 // Frost-Aura-Immunität ab SP_FAST_ENEMY_SLOW_IMMUNITY_WAVE.
+// Nachtrag (visuelle Aufwertung, eigene Nutzer-Sprites): `visualKind` wählt rein die Optik eines
+// normalen (Nicht-Boss-)Gegners (siehe ENEMY_SPRITE_FOR_KIND unten, 'guard' als neutraler Default -
+// betrifft NUR das Aussehen, keine Balance-Werte). `bossIndex` (nur für isBoss) wählt analog, welcher
+// der 10 Boss-Charaktere gezeichnet wird - siehe makeWaveEnemies() für die Herleitung aus der Welle.
 function pushEnemy(list, opts) {
-  const { hp, speed, radius, color, reward, isBoss = false, flying = false, fast = false, shieldHits = 0 } = opts;
+  const { hp, speed, radius, color, reward, isBoss = false, flying = false, fast = false, shieldHits = 0, visualKind = 'guard', bossIndex = 0 } = opts;
   list.push({
     hp, maxHp: hp, speed, baseSpeed: speed, radius, color, reward,
-    isBoss: !!isBoss, flying: !!flying, fast: !!fast, shieldHits, maxShieldHits: shieldHits,
+    isBoss: !!isBoss, flying: !!flying, fast: !!fast, shieldHits, maxShieldHits: shieldHits, visualKind, bossIndex,
     wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
   });
 }
@@ -2416,23 +2502,28 @@ function makeWaveEnemies(w) {
     const cnt = Math.round(baseCount(w) * SWARM_COUNT_MULT);
     const hp = hp0 * SWARM_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits });
+      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits, visualKind: 'sprinter' });
     }
   } else if (type === 'relief') {
     const cnt = baseCount(w);
     const hp = hp0 * POST_BOSS_RELIEF_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits });
+      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits, visualKind: 'brecher' });
     }
   } else if (type === 'boss') {
     const cnt = Math.round(baseCount(w) * 0.7);
     const escortHp = hp0 * BOSS_ESCORT_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits });
+      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits, visualKind: 'brecher' });
     }
     // Boss spawns last -> arrives at the end of the wave
+    // Nachtrag (Steampunk-Carnival-Sprites): bossIndex zyklisch 1-10 ueber die Boss-Wellen (w%5===0),
+    // damit jede 5. Welle eine der 10 verfuegbaren Boss-Grafiken zeigt. Boss #1 (Welle 5) nutzt in
+    // draw() bewusst die animierte Affen-Trommel-Grafik statt des statischen boss_L1-Icons, siehe
+    // drawMonkeyWalk() oben.
+    const bIdx = ((Math.floor(w / 5) - 1) % 10) + 1;
     const bHp = Math.round(hp0 * bossMult(w));
-    pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits });
+    pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits, bossIndex: bIdx });
   } else if (type === 'flying') {
     // Flieger-Welle (Nachtrag): ab Welle 12, alle 10 Wellen (siehe waveType() in
     // balance-singleplayer.js). Boden-Türme (Pfeil/Kanone/Titan) können diese Gegner nur zum
@@ -2443,12 +2534,12 @@ function makeWaveEnemies(w) {
     // Gleiche Anzahl wie eine normale Welle (baseCount(w)).
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits });
+      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits, visualKind: 'flugeinheit' });
     }
   } else { // normal
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits });
+      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits, visualKind: 'guard' });
     }
   }
 
@@ -2546,6 +2637,63 @@ document.querySelectorAll('#spSpeedRow .sp-speed-btn').forEach(btn => {
   });
 });
 
+// ── Visuelle "Juice"-Effekte (Nachtrag, rein optisch, keine Balance-Auswirkung) ────────────────────
+// spawnParticles(): einfache kurzlebige Funkenpartikel (Treffer/Tod), spawnFloatingText(): fliegende
+// Schadenszahl über dem Gegner, triggerShake(): kurzer Kamera-Zittereffekt für spürbare Flächentreffer.
+// Alle drei sind bewusst simpel gehalten (keine Bilder, nur Canvas-Primitive) - siehe docs/visuals.md.
+function spawnParticles(x, y, color, count, opts) {
+  opts = opts || {};
+  const spread = opts.spread || 1;
+  const baseSpeed = opts.speed || 0.09;
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (baseSpeed * 0.4 + Math.random() * baseSpeed) * spread;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 260 + Math.random() * 220,
+      maxLife: 480,
+      color,
+      size: 1.5 + Math.random() * 2,
+    });
+  }
+}
+function spawnFloatingText(x, y, text, color) {
+  floatingTexts.push({ x, y: y - 10, text, color: color || '#fff', life: 650, maxLife: 650, vy: -0.028 });
+}
+function triggerShake(mag) {
+  screenShake.time = Math.max(screenShake.time, 140);
+  screenShake.mag = Math.max(screenShake.mag, mag);
+}
+// updateEffects(): läuft mit dem ECHTEN Frame-dt (aus loop(), unabhängig von gameSpeedMultiplier),
+// damit die Effekte auch bei hohem Spieltempo normal schnell (und damit lesbar) ablaufen.
+function updateEffects(dt) {
+  if (!dt || dt > 200) return; // Tab-Wechsel/Ruckler: keinen Riesensprung interpolieren
+  particles = particles.filter(p => {
+    p.life -= dt;
+    if (p.life <= 0) return false;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 0.00025 * dt; // leichte "Schwerkraft", damit Funken nicht endlos geradeaus fliegen
+    return true;
+  });
+  floatingTexts = floatingTexts.filter(f => {
+    f.life -= dt;
+    if (f.life <= 0) return false;
+    f.y += f.vy * dt;
+    return true;
+  });
+  if (screenShake.time > 0) {
+    screenShake.time -= dt;
+    if (screenShake.time <= 0) { screenShake.time = 0; screenShake.mag = 0; }
+  }
+  // Boss-Lauf-/Trommel-Animation (4 Frames, siehe drawMonkeyWalk() oben) - 150ms pro Frame, mit dem
+  // echten Frame-dt statt der Spielgeschwindigkeit.
+  bossAnimAccum += dt;
+  if (bossAnimAccum >= 150) { bossAnimAccum -= 150; bossAnimFrame = (bossAnimFrame + 1) % 4; }
+}
+
 function damageEnemy(enemy, dmg) {
   // Gegner-Schild (Nachtrag, auf Nutzeranfrage "Ab runde 25 bekommen die gegner einen schild der
   // einen Hit abhält ... ab runde 45 hält der schild 2 Hits aus"): absorbiert einen kompletten
@@ -2554,9 +2702,13 @@ function damageEnemy(enemy, dmg) {
   // Tesla-Kettensprung. Läuft einfach leer, sobald shieldHits auf 0 ist (normales Verhalten danach).
   if (enemy.shieldHits > 0) {
     enemy.shieldHits--;
+    spawnParticles(enemy.x, enemy.y, '#60a5fa', 4, { speed: 0.06 }); // blauer Schild-Funke statt Schadenszahl
     return;
   }
   enemy.hp -= dmg;
+  // Fliegende Schadenszahl + kleiner Treffer-Funken bei jedem Treffer (rein optisch).
+  spawnFloatingText(enemy.x, enemy.y - enemy.radius, Math.round(dmg).toString(), '#fff');
+  spawnParticles(enemy.x, enemy.y, enemy.color, 3, { speed: 0.05 });
   if (enemy.hp <= 0) {
     // Kill-Gold-Boni: Wirtschaft T1 (Nachtrag/Balance-Fix, ersetzt die entfernte Mine) gibt einen
     // pauschalen additiven Bonus pro Kill (SP_KILL_GOLD_FLAT_BONUS_TIER1), Wirtschaft T2 (Port aus
@@ -2564,6 +2716,8 @@ function damageEnemy(enemy, dmg) {
     // T1-Bonus, nicht nur auf den Basis-Reward des Gegners.
     const flatBonus = hasSpTech('economy', 1) ? SP_KILL_GOLD_FLAT_BONUS_TIER1 : 0;
     gold += (enemy.reward + flatBonus) * (hasSpTech('economy', 2) ? (1 + SP_KILL_GOLD_BOOST_TIER2) : 1);
+    // Todes-Explosion: deutlich mehr/größere Partikel als ein normaler Treffer, damit Kills spürbar sind.
+    spawnParticles(enemy.x, enemy.y, enemy.color, 14, { speed: 0.14, spread: 1.4 });
     enemies = enemies.filter(e => e !== enemy);
     updateStats();
   }
@@ -2727,6 +2881,9 @@ function update(dt) {
         enemies.slice().forEach(e => {
           if (Math.hypot(e.x - p.target.x, e.y - p.target.y) <= p.splash) damageEnemy(e, p.damage);
         });
+        // Kleiner Kamera-Zittereffekt bei Flächenschaden (rein optisch) - macht AoE-Treffer spürbarer.
+        triggerShake(2.5);
+        spawnParticles(p.target.x, p.target.y, '#ffb347', 8, { speed: 0.11, spread: 1.2 });
       } else if (p.chainJumps) {
         // Tesla-Kettenblitz: erster Treffer beim Primärziel, danach springt der Schaden vom jeweils
         // zuletzt getroffenen Ziel zum nächstgelegenen noch nicht getroffenen FLIEGENDEN Ziel weiter -
@@ -2766,17 +2923,61 @@ function update(dt) {
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Nachtrag (visuelle Aufwertung): kurzer Kamera-Zittereffekt bei Flächenschaden (triggerShake(),
+  // siehe oben) - rein optisch, verschiebt nur den kompletten Zeichenkontext für ein paar Frames.
+  ctx.save();
+  if (screenShake.time > 0) {
+    const amt = screenShake.mag * (screenShake.time / 140);
+    ctx.translate((Math.random() - 0.5) * amt * 2, (Math.random() - 0.5) * amt * 2);
+  }
+
+  // Nachtrag (Steampunk-Carnival-Sprites, eigene Grafiken des Nutzers): Terrain-/Pfad-Zellen nutzen
+  // jetzt, falls geladen, echte Kachel-Grafiken statt der Schachbrett-/Verlauf-Optik - mit
+  // vollständigem Fallback auf den bisherigen Look, falls ein Bild (noch) nicht bereit ist. Der
+  // Pfad-Set (`pathSet`) wird einmal vorab gebaut, damit die Terrain-Schleife pro Zelle nur einen
+  // schnellen Set-Lookup statt einer linearen pathCells-Suche braucht.
+  const pathSet = new Set(pathCells.map(([c,r]) => c + ',' + r));
+  const TERRAIN_VARIANTS = ['terrain_grass', 'terrain_grass', 'terrain_grass', 'terrain_cobblestone', 'terrain_construction', 'terrain_flowerbeds'];
   // grass grid
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
-      ctx.fillStyle = (r+c)%2===0 ? '#232a33' : '#212831';
-      ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+      if (pathSet.has(c + ',' + r)) continue; // Pfad-Zellen werden unten separat gezeichnet
+      const variant = TERRAIN_VARIANTS[Math.floor(cellRandom(c, r, 1) * TERRAIN_VARIANTS.length)];
+      if (!drawSprExact(variant, c*CELL, r*CELL, CELL, CELL)) {
+        ctx.fillStyle = (r+c)%2===0 ? '#232a33' : '#212831';
+        ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+      }
     }
   }
-  // path
+  // Deko-Objekte (Zelte/Laterne/Baum) - nur auf freien Terrain-Zellen (kein Pfad, keine Turm-Zelle),
+  // deterministisch platziert über cellRandom() statt echtem Zufall, damit sie nicht jeden Frame
+  // "flackern". Dünn gestreut (nur ~8% aller Zellen).
+  const DECOR_OBJS = ['obj_tree', 'obj_tent1', 'obj_tent2', 'obj_lamppost'];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (pathSet.has(c + ',' + r)) continue;
+      const roll = cellRandom(c, r, 2);
+      if (roll < 0.08) {
+        const key = DECOR_OBJS[Math.floor(cellRandom(c, r, 3) * DECOR_OBJS.length)];
+        drawSpr(key, c*CELL + CELL/2, r*CELL + CELL/2, CELL * 0.9);
+      }
+    }
+  }
+  // path (Nachtrag, visuelle Aufwertung: statt einer flachen Einheitsfarbe jetzt ein Verlauf +
+  // dezente helle Kante, damit der Weg mehr wie ein befestigter Pfad statt wie eine einfarbige
+  // Zellauswahl wirkt - siehe docs/visuals.md; Nachtrag Steampunk-Carnival: mit Sprite-Kachel, falls
+  // geladen)
   pathCells.forEach(([c,r]) => {
-    ctx.fillStyle = '#3a3f47';
-    ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
+    const x = c*CELL, y = r*CELL;
+    if (drawSprExact('road_1', x, y, CELL, CELL)) return;
+    const grad = ctx.createLinearGradient(x, y, x, y + CELL);
+    grad.addColorStop(0, '#454b54');
+    grad.addColorStop(1, '#33383f');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, CELL, CELL);
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, CELL - 1, CELL - 1);
   });
 
   // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
@@ -2802,13 +3003,43 @@ function draw() {
       ctx.lineWidth = 1;
       ctx.strokeRect(t.c * CELL, t.r * CELL, t.footprint * CELL, t.footprint * CELL);
     }
+    // Nachtrag (visuelle Aufwertung): weicher Glow-Halo in Turmfarbe hinter dem Turm - Stärke/Größe
+    // wächst leicht mit dem Stern-Level, damit hochgestufte Türme optisch spürbar "mächtiger" wirken.
+    const glowR = radius * (1.6 + Math.min(t.tier, 10) * 0.04);
+    const glow = ctx.createRadialGradient(t.x, t.y, radius * 0.4, t.x, t.y, glowR);
+    glow.addColorStop(0, t.color + '55');
+    glow.addColorStop(1, t.color + '00');
+    ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.fillStyle = darkenColor(t.color, t.tier);
-    ctx.arc(t.x, t.y, radius, 0, Math.PI*2);
+    ctx.arc(t.x, t.y, glowR, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = '#10151b';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+
+    // Nachtrag (Steampunk-Carnival-Sprites): der Pfeilturm bekommt eine echte 5-Stufen-Sprite-
+    // Evolution (tower_arrow_L1..L5, tier 0-10 -> Stage 1-5) - die einzige der 6 Turm-Reihen im
+    // Moodboard, die durchgängig sauber/konsistent war (siehe docs/visuals.md, "Was NICHT
+    // eingearbeitet ist"). Alle anderen 5 Turmarten bleiben bei der bisherigen prozeduralen
+    // Kreis-Darstellung, mit demselben Fallback-Mechanismus falls das Sprite (noch) nicht bereit ist.
+    let spriteDrawn = false;
+    if (t.type === 'arrow') {
+      const stage = Math.min(5, Math.floor(t.tier / 2) + 1);
+      spriteDrawn = drawSpr('tower_arrow_L' + stage, t.x, t.y, radius * 2.6);
+    }
+    if (!spriteDrawn) {
+      ctx.beginPath();
+      ctx.fillStyle = darkenColor(t.color, t.tier);
+      ctx.arc(t.x, t.y, radius, 0, Math.PI*2);
+      ctx.fill();
+      // Dezenter heller Lichtreflex oben links, für einen leichten 3D-/Kugel-Eindruck ohne echte Sprites.
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.arc(t.x - radius*0.3, t.y - radius*0.3, radius*0.4, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = '#10151b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(t.x, t.y, radius, 0, Math.PI*2);
+      ctx.stroke();
+    }
     drawLevelStars(ctx, t.x, t.y, t.tier);
     if (t === selectedTower) {
       ctx.beginPath();
@@ -2821,10 +3052,34 @@ function draw() {
 
   // enemies
   enemies.forEach(e => {
+    // Nachtrag (visuelle Aufwertung): weicher Bodenschatten unter jedem Gegner, gibt etwas Tiefe.
     ctx.beginPath();
-    ctx.fillStyle = e.color;
-    ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.ellipse(e.x, e.y + e.radius * 0.7, e.radius * 0.9, e.radius * 0.35, 0, 0, Math.PI*2);
     ctx.fill();
+
+    // Nachtrag (Steampunk-Carnival-Sprites): Gegner-Sprite statt flachem Kreis, falls geladen -
+    // visualKind (siehe pushEnemy()/makeWaveEnemies()) mappt die 5 Welle-Generator-Zweige auf die 4
+    // verfügbaren Kreatur-Grafiken; Bosse nutzen bossIndex (1 = animierter Affe/Trommel-Boss #1,
+    // per Nutzerwunsch, 2-10 = statische Boss-Icons aus dem Moodboard). Fallback auf den bisherigen
+    // Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
+    let spriteDrawn = false;
+    if (e.isBoss) {
+      if (e.bossIndex === 1) {
+        spriteDrawn = drawMonkeyWalk(e.x, e.y, e.radius * 3.4, bossAnimFrame);
+      } else if (e.bossIndex >= 2) {
+        spriteDrawn = drawSpr('boss_L' + e.bossIndex, e.x, e.y, e.radius * 3.4);
+      }
+    } else {
+      const enemySpriteKey = { sprinter: 'enemy_sprinter', guard: 'enemy_guard', brecher: 'enemy_brecher', flugeinheit: 'enemy_flugeinheit' }[e.visualKind];
+      if (enemySpriteKey) spriteDrawn = drawSpr(enemySpriteKey, e.x, e.y, e.radius * 2.8);
+    }
+    if (!spriteDrawn) {
+      ctx.beginPath();
+      ctx.fillStyle = e.color;
+      ctx.arc(e.x, e.y, e.radius, 0, Math.PI*2);
+      ctx.fill();
+    }
     // Flieger-Kennzeichnung (Nachtrag): weißer Ring, exakt wie im Multiplayer bei fliegenden Einheiten.
     if (e.flying) {
       ctx.beginPath();
@@ -2855,13 +3110,52 @@ function draw() {
     ctx.fillRect(e.x - w/2, e.y - e.radius - 8, w * (e.hp/e.maxHp), 4);
   });
 
-  // projectiles
+  // projectiles (Nachtrag, visuelle Aufwertung: kurzer verblassender Bewegungs-Trail statt eines
+  // reinen Einzelpunkts - p.trailX/p.trailY merken sich die zuletzt gezeichnete Position und werden
+  // hier pro echtem Frame nachgeführt, unabhängig von der Anzahl der update()-Aufrufe pro Frame)
   projectiles.forEach(p => {
+    if (p.trailX === undefined) { p.trailX = p.x; p.trailY = p.y; }
+    ctx.strokeStyle = p.color;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(p.trailX, p.trailY);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    p.trailX = p.x; p.trailY = p.y;
+
     ctx.beginPath();
     ctx.fillStyle = p.color;
     ctx.arc(p.x, p.y, 4, 0, Math.PI*2);
     ctx.fill();
   });
+
+  // Nachtrag (visuelle Aufwertung): Treffer-/Todes-Partikel (spawnParticles(), siehe damageEnemy()).
+  particles.forEach(pt => {
+    ctx.globalAlpha = Math.max(0, pt.life / pt.maxLife);
+    ctx.beginPath();
+    ctx.fillStyle = pt.color;
+    ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+
+  // Nachtrag (visuelle Aufwertung): fliegende Schadenszahlen (spawnFloatingText(), siehe damageEnemy()).
+  floatingTexts.forEach(f => {
+    ctx.globalAlpha = Math.max(0, f.life / f.maxLife);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.strokeText(f.text, f.x, f.y);
+    ctx.fillStyle = f.color;
+    ctx.fillText(f.text, f.x, f.y);
+  });
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+
+  ctx.restore(); // Ende Screen-Shake-Translate
 }
 
 function loop(ts) {
@@ -2876,6 +3170,10 @@ function loop(ts) {
   // Faktor. Gezeichnet wird bewusst nur einmal pro echtem Frame (reine Performance, keine
   // Balance-Auswirkung).
   for (let i = 0; i < gameSpeedMultiplier && !gameOver; i++) update(dt);
+  // Nachtrag (visuelle Aufwertung): Partikel/Schadenszahlen/Screen-Shake laufen mit dem ECHTEN
+  // Frame-dt, NICHT mehrfach wie update() oben - sonst würden sie bei 5x/10x Spieltempo unlesbar
+  // schnell durchrauschen, obwohl sie rein optisch sind und keine Spiellogik enthalten.
+  updateEffects(dt);
   draw();
   // Gold-Anzeige jeden Frame aktualisieren, nicht nur bei diskreten Events — nötig, weil die
   // Zinsen-Tech (Wirtschaft T3) das Gold jetzt auch kontinuierlich zwischen den Events verändert.
