@@ -710,52 +710,49 @@ function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LAN
 // Die MP-Lane hat nur EINE gerade Pfad-Reihe (PATH_ROW, über die volle Breite) - anders als die
 // SP-Karte (Teil 6) also KEINE Kurven, keine Sockel-Logik nötig.
 //
-// Nachtrag (Teil 12, auf Nutzeranfrage "Nutze die tiles so, das eins für 3x3 genutzt wird. für den
-// Weg nehmen wir nur ground_r2c1, und oben fehlt dann ein drittel tile nur dafür nehmen wir die
-// mitte von ground_r1c2 und ground_r1c3 im wechsel"): ersetzt den EIN-großes-Cover-Bild-Ansatz aus
-// Teil 10 (`terrain_plaza`) durch die einzelnen `gelaende/ground_r{1-3}c{1-5}.png`-Kacheln
-// (180×180px nativ, siehe docs/tileset.md) - jede Kachel wird bei einer festen Skala von 3
-// Zellen = 1 Kachel gezeichnet (`MP_GROUND_TILE_SCALE` = 120/180 = 2/3, CELL=40 → 3 Zellen = 120px).
-// Weg: nur noch `ground_r2c1` (statt der bisherigen `way_ew_*`-Kacheln aus dem wege/-Set), pro Spalte
-// exakt auf eine Zelle (CELL×CELL) gezogen - die MP-Lane hat ohnehin nur die gerade Ost-West-Strecke,
-// keine Kurven nötig. Gelände: da PATH_ROW die 4 Reihen immer in ein 2-Reihen-Band (oben) und ein
-// 1-Reihen-Band (unten) zerschneidet, gibt es NIRGENDS 3 zusammenhängende Terrain-Reihen für eine
-// volle Kachel - stattdessen wird für jedes Band nur ein zur tatsächlichen Bandhöhe passender,
-// MITTIG aus der Quellkachel geschnittener Ausschnitt bei derselben 2/3-Skala gezeichnet
-// (`mpDrawGroundTileBand()`) - für das 80px-hohe obere Band (2 Zeilen, "fehlt ein Drittel" der vollen
-// 120px-Kachelhöhe) abwechselnd `ground_r1c2`/`ground_r1c3` alle 3 Spalten, wie vom Nutzer
-// vorgegeben. Für das untere, nur 40px hohe Band (1 Zeile, unterhalb des Wegs) gibt die Anfrage keine
-// Vorgabe - eigene Erweiterung: dieselben zwei Kacheln (`ground_r1c2`/`ground_r1c3`) wiederverwendet,
-// aus Konsistenzgründen statt eine dritte Kachelwahl einzuführen; leicht änderbar (siehe
-// MP_GROUND_BAND_TILES unten), falls der Nutzer lieber z.B. `ground_r3c2`/`ground_r3c3` dafür sehen
-// möchte. Volle Herleitung/Vorschau-Screenshots siehe docs/tileset.md, "Multiplayer-Gelände (Teil 12)".
+// Nachtrag (Teil 13, Map-Redesign auf Nutzeranfrage, 2026-08-03): löst das alte Teil-12-Layout ab.
+// `ground_r2c1`/`ground_r2c2` sind die "Wege"-Kacheln (180×180px nativ, 3×3 Zellen groß bei
+// MP_GROUND_TILE_SCALE = 3×CELL/180) und decken jetzt DIREKT die unteren 3 der 4 Lane-Reihen ab
+// (Reihen 1-3, 0-indiziert - inkl. der Pfad-Reihe PATH_ROW=2 mittendrin) - das ist exakt die native
+// 3-Zeilen-Kachelhöhe, also OHNE Zuschnitt. Spaltenweise in 3er-Gruppen (MP_BAND_GROUPS): erste UND
+// letzte Gruppe `ground_r2c2`, alle Gruppen dazwischen `ground_r2c1`, wie vom Nutzer vorgegeben.
+// Reihe 0 (oberste) bleibt bewusst frei von den Wege-Kacheln - dort wird nur das UNTERE Drittel von
+// `ground_r1c2`/`ground_r1c3` im Wechsel gezeigt (`mpDrawGroundTileBand(..., 'bottom')`, dieselbe
+// 3er-Spaltengruppierung). Ersetzt damit auch den bisherigen separaten Pfad-Overlay (nur noch
+// `ground_r2c1` pro Zelle) aus Teil 12 - der ist jetzt redundant, weil die Pfad-Optik längst Teil der
+// großen `ground_r2c1`/`r2c2`-Kacheln ist.
 const MP_ASSET_FILES = {
-  ground_r1c2: 'ground_r1c2.png', ground_r1c3: 'ground_r1c3.png', ground_r2c1: 'ground_r2c1.png',
+  ground_r1c2: 'ground_r1c2.png', ground_r1c3: 'ground_r1c3.png',
+  ground_r2c1: 'ground_r2c1.png', ground_r2c2: 'ground_r2c2.png',
 };
 // Nachtrag (Teil 11): das Befüllen von MP_SPR (Bild-Ladevorgänge anstoßen) passiert jetzt erst WEITER
 // UNTEN, NACHDEM alle MP_ASSET_FILES-Einträge (inkl. der Turm-/Einheiten-Sprites aus Teil 11) gesetzt
 // sind - vorher lief die Schleife direkt hier und hätte alle später per `MP_ASSET_FILES.xyz = ...`
 // nachträglich hinzugefügten Einträge (siehe unten) schlicht verpasst.
-// mpDrawSprExact(): identisch zu SPs drawSprExact() - füllt exakt dx/dy/dw/dh, für die
-// Weg-Kacheln, die genau eine Lane-Zelle (CELL×CELL) ausfüllen sollen.
+// mpDrawSprExact(): identisch zu SPs drawSprExact() - füllt exakt dx/dy/dw/dh. Seit Teil 13 (der
+// separate Pfad-Overlay pro Zelle entfiel, siehe drawLane()) aktuell ungenutzt, bleibt aber als
+// kleine Hilfsfunktion bestehen (z.B. für spätere exakt-Zelle-große Kacheln).
 function mpDrawSprExact(ctx, key, dx, dy, dw, dh) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   ctx.drawImage(rec.img, dx, dy, dw, dh);
   return true;
 }
-// mpDrawGroundTileBand() (Teil 12): zeichnet einen MITTIG aus der Quellkachel geschnittenen
-// Ausschnitt bei fester MP_GROUND_TILE_SCALE-Skala, sodass jede Gelände-Kachel unabhängig von der
-// tatsächlich verfügbaren Bandhöhe/-breite in derselben "3 Zellen = 1 Kachel"-Größe erscheint - bei
-// dw=dh=3*CELL (voller Block) entspricht der Ausschnitt der kompletten 180×180px-Quellkachel, bei
-// kleineren dw/dh (wie den 80px/40px hohen Terrain-Bändern der MP-Lane) entsprechend weniger.
+// mpDrawGroundTileBand() (Teil 12, erweitert in Teil 13 um `vAlign`): zeichnet einen aus der
+// Quellkachel geschnittenen Ausschnitt bei fester MP_GROUND_TILE_SCALE-Skala, sodass jede
+// Gelände-Kachel unabhängig von der tatsächlich verfügbaren Bandhöhe/-breite in derselben "3 Zellen =
+// 1 Kachel"-Größe erscheint - bei dw=dh=3*CELL (voller Block, siehe Reihen 1-3 in drawLane()) entspricht
+// der Ausschnitt der kompletten 180×180px-Quellkachel (kein Zuschnitt). Bei kleinerem dh (Reihe 0,
+// "das untere Drittel") wird per `vAlign='bottom'` der UNTERE Ausschnitt statt der Bildmitte gewählt
+// (`vAlign='center'`, Standard, bisheriges Verhalten unverändert für alle anderen Aufrufe).
 const MP_GROUND_TILE_SCALE = (3 * CELL) / 180; // 3 Zellen je Kachel (CELL unabhängig)
-function mpDrawGroundTileBand(ctx, key, dx, dy, dw, dh) {
+function mpDrawGroundTileBand(ctx, key, dx, dy, dw, dh, vAlign) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   const srcW = Math.min(rec.w, dw / MP_GROUND_TILE_SCALE);
   const srcH = Math.min(rec.h, dh / MP_GROUND_TILE_SCALE);
-  const sx = (rec.w - srcW) / 2, sy = (rec.h - srcH) / 2;
+  const sx = (rec.w - srcW) / 2;
+  const sy = vAlign === 'bottom' ? (rec.h - srcH) : (rec.h - srcH) / 2;
   ctx.drawImage(rec.img, sx, sy, srcW, srcH, dx, dy, dw, dh);
   return true;
 }
@@ -2187,40 +2184,32 @@ function updateUIFromState() {
 
 function drawLane(ctx, structures, units, projectiles) {
   ctx.clearRect(0, 0, LANE_W, LANE_H);
-  // Nachtrag (Teil 12, "Nutze die tiles so, das eins für 3x3 genutzt wird ... für den Weg nehmen wir
-  // nur ground_r2c1 ... oben nehmen wir die mitte von ground_r1c2 und ground_r1c3 im wechsel"):
-  // Terrain-Bänder oberhalb (Reihen 0..PATH_ROW-1) und unterhalb (Reihen PATH_ROW+1..LANE_ROWS-1) der
-  // Pfad-Reihe, je in 3-Spalten-Gruppen mit abwechselnder Kachel gezeichnet - siehe
-  // MP_GROUND_BAND_TILES/MP_BAND_GROUPS/mpDrawGroundTileBand() weiter oben. Vollständiger Fallback
-  // auf die alte Schachbrett-Optik pro Zelle, falls ein Bild (noch) nicht geladen ist.
-  const topRows = PATH_ROW, bottomRows = LANE_ROWS - PATH_ROW - 1;
+  // Nachtrag (Teil 13, Map-Redesign auf Nutzeranfrage, 2026-08-03 - siehe ausführlicher Kommentar bei
+  // MP_ASSET_FILES weiter oben): `ground_r2c1`/`ground_r2c2` ("Wege"-Kacheln, 3×3 Zellen groß) decken
+  // jetzt als EIN zusammenhängender Block die Reihen 1-3 ab (0-indiziert - passt exakt zur nativen
+  // 3-Zeilen-Kachelhöhe, inkl. Pfad-Reihe PATH_ROW=2 mittendrin, kein separater Weg-Overlay mehr
+  // nötig). Spaltenweise in 3er-Gruppen (MP_BAND_GROUPS): erste und letzte Gruppe `ground_r2c2`, alle
+  // dazwischen `ground_r2c1`. Reihe 0 bleibt frei davon - dort nur das untere Drittel von
+  // `ground_r1c2`/`ground_r1c3` im Wechsel (dieselbe Gruppierung). Vollständiger Fallback auf die
+  // alte Schachbrett-Optik pro Zelle, falls ein Bild (noch) nicht geladen ist.
+  const lastGroupIdx = MP_BAND_GROUPS.length - 1;
   MP_BAND_GROUPS.forEach((g, i) => {
-    const tileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
     const gx = g.c0 * CELL, gw = g.cols * CELL;
-    if (topRows > 0 && !mpDrawGroundTileBand(ctx, tileKey, gx, 0, gw, topRows * CELL)) {
-      for (let r = 0; r < topRows; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
+    const wegeTileKey = (i === 0 || i === lastGroupIdx) ? 'ground_r2c2' : 'ground_r2c1';
+    if (!mpDrawGroundTileBand(ctx, wegeTileKey, gx, 1 * CELL, gw, 3 * CELL)) {
+      for (let r = 1; r < LANE_ROWS; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
         ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
         ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
       }
     }
-    if (bottomRows > 0) {
-      const by = (PATH_ROW + 1) * CELL;
-      if (!mpDrawGroundTileBand(ctx, tileKey, gx, by, gw, bottomRows * CELL)) {
-        for (let r = PATH_ROW + 1; r < LANE_ROWS; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
-          ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
-          ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-        }
+    const topTileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
+    if (!mpDrawGroundTileBand(ctx, topTileKey, gx, 0, gw, CELL, 'bottom')) {
+      for (let c = g.c0; c < g.c0 + g.cols; c++) {
+        ctx.fillStyle = c % 2 === 0 ? '#232a33' : '#212831';
+        ctx.fillRect(c * CELL, 0, CELL, CELL);
       }
     }
   });
-  // Weg (gerade Ost-West-Strecke über die volle Breite): nur noch `ground_r2c1`, pro Spalte exakt
-  // auf eine Zelle gezogen - wird wie zuvor über den Gelände-Hintergrund gezeichnet.
-  for (let c = 0; c < LANE_COLS; c++) {
-    const x = c * CELL, y = PATH_ROW * CELL;
-    if (mpDrawSprExact(ctx, 'ground_r2c1', x, y, CELL, CELL)) continue;
-    ctx.fillStyle = '#3a3f47';
-    ctx.fillRect(x, y, CELL, CELL);
-  }
   // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
   // bei vielen Türmen unübersichtlich. Jetzt nur noch für den aktuell ausgewählten Turm, dafür mit
   // einem Rahmen, damit der Kreis trotz der dünnen Füllung gut erkennbar bleibt.
@@ -2268,7 +2257,14 @@ function drawLane(ctx, structures, units, projectiles) {
     const visLevel = u.isBoss ? (u.bossIndex || 1) : Math.max(1, Math.min(10, u.tier || 0));
     // Nachtrag (User-Feedback, 2026-08-03: "Skalierung auf 80% von der aktuellen Größe"): ×0.8 auf
     // die bisherige Zielbreite, statt (verworfener Versuch) den Boden-Anker zu ändern.
-    const targetW = u.radius * (visKind === 'boss' ? 6.8 : 5.6) * 0.8;
+    // Nachtrag 2 (User-Feedback, Screenshot "Boss ist nicht auf der Spur"): bei Mittelpunkt-Anker
+    // wird jedes Sprite je zur Hälfte über/unter u.y gezeichnet - der Boss hatte mit BOSS_RADIUS=40
+    // UND dem größten Multiplikator (6.8, ggü. 5.6 bei normalen Einheiten) eine Bildhöhe von ~455px
+    // bei nur 80px Zeilenhöhe (CELL) - er "schwebte" dadurch weit über die Spur hinaus, deutlich
+    // extremer als jede normale Einheit. Boss-Multiplikator 6.8→5.2 gesenkt (bleibt trotzdem klar
+    // größer als alle normalen Einheiten, ~×1,15 der bisher größten Einheit Titan) - normale
+    // Einheiten (5.6) bewusst unverändert gelassen, wie angefragt.
+    const targetW = u.radius * (visKind === 'boss' ? 5.2 : 5.6) * 0.8;
     // Nachtrag (User-Feedback "Flugeinheiten sollen ein halbes Feld höher dargestellt werden"):
     // drawY statt u.y für alles Sichtbare (Sprite/Kreis-Fallback/Flieger-Ring/Level-Stern) - u.y
     // selbst bleibt unverändert (Spiellogik/Kollision/Weg-Position), nur die Darstellung wird für
@@ -3531,9 +3527,11 @@ function draw() {
     // den bisherigen Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
     // Nachtrag (User-Feedback, 2026-08-03: "Skalierung auf 80% von der aktuellen Größe"): ×0.8 auf
     // die bisherige Zielbreite, analog zum Multiplayer-Pendant.
+    // Nachtrag 2 (analog zum MP-Fix "Boss ist nicht auf der Spur"): Boss-Multiplikator 3.4→2.6
+    // gesenkt (gleiches Verhältnis wie beim MP-Fix, ~24% weniger) - normale Gegner (2.8) unverändert.
     let spriteDrawn = false;
     if (e.isBoss) {
-      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, drawY, e.radius * 3.4 * 0.8, walkAnimFrame);
+      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, drawY, e.radius * 2.6 * 0.8, walkAnimFrame);
     } else if (e.visualKind) {
       spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, drawY, e.radius * 2.8 * 0.8, walkAnimFrame);
     }
