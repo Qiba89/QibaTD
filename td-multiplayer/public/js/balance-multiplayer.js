@@ -7,7 +7,7 @@
 const TOWER_TYPES = {
   arrow:  { name: 'Pfeilturm', cost: 50,  range: 110, damage: 9,  fireRate: 500,  color: '#4fd1c5', projSpeed: 500 },
   cannon: { name: 'Kanone',    cost: 100, range: 90,  damage: 25, fireRate: 1100, color: '#ff9f43', projSpeed: 320, splash: 45, groundOnly: true },
-  frost:  { name: 'Frostturm', cost: 80,  range: 100, damage: 4,  fireRate: 700,  color: '#63b3ed', projSpeed: 550, slow: 0.5, slowDuration: 1500 },
+  frost:  { name: 'Frostturm', cost: 80,  range: 100, aura: true, slow: 0.5, slowDuration: 1500, color: '#63b3ed' },
   // Tesla-Turm (Nachtrag): reiner Anti-Air-Spezialist - feuert NUR auf Fliegende (`airOnly`,
   // Gegenstück zu `groundOnly` bei der Kanone), dafür mit Kettenblitz (siehe `teslaChainJumps()`
   // unten und moveProjectiles() in index.html): der Schaden springt beim Einschlag von Ziel zu Ziel
@@ -29,6 +29,7 @@ const TOWER_TYPES = {
   // anvisieren kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt
   // "Tesla-Turm".
   tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 500, airOnly: true },
+  booster: { name: 'Booster',   cost: 80,  range: 120, aura: true, color: '#fbbf24' },
   // Kosten 60 → 100: bei 60 war die Amortisationszeit (10s bis der Grund-Ertrag von 6 Gold/s die
   // Kosten wieder reingeholt hat) zu kurz - eine Mine war praktisch risikofrei sofort im Vorteil.
   // Bei 100 sind es ~16.7s Amortisation, spürbar mehr Risiko/Opportunitätskosten (das Gold hätte in
@@ -36,7 +37,7 @@ const TOWER_TYPES = {
   // (6 Gold/s Basis) bewusst unverändert, siehe mineIncome() unten.
   mine:   { name: 'Mine',      cost: 100, color: '#ffd166' },
 };
-const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'mine'];
+const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'booster', 'mine'];
 
 // Tesla-Kettenblitz: Sprunganzahl nach Turm-Tier gestaffelt (siehe TOWER_TYPES.tesla-Kommentar
 // oben). Gedeckelt bei Tier 6 von 10 (nicht weiter bei Vollausbau gestiegen) - 5 gleichzeitig
@@ -69,7 +70,9 @@ const DEFAULT_INCOME_BOOST_RATE = 0.10;
 // auf die gesendete Einheit (braucht das neue `key`-Feld auf dem Einheiten-Objekt, siehe
 // hostSendUnit()). Details/Begründung je Einheit in docs/balancing.md, Abschnitt "Apex-Fähigkeiten".
 //  - sprinter: bei Vollausbau immun gegen Flächenschaden (Kanonen-Splash trifft ihn nicht mehr).
-//  - guard:    bei Vollausbau Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (80%) der Max-HP pro Sekunde.
+//  - guard:    bei Vollausbau Selbstheilung GUARD_APEX_HEAL_PCT_PER_SEC (8%) der Max-HP pro Sekunde.
+//              (Nachtrag, Bugfix auf Nutzeranfrage: stand ursprünglich fälschlich auf 80% - bei 80%/s
+//              war die Einheit bei Vollausbau praktisch unbesiegbar, siehe docs/balancing.md.)
 //  - brecher:  bei Vollausbau zusätzlich immun gegen Slow (war bisher nur Fliegenden vorbehalten).
 //  - icecube:  bei Vollausbau nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
 //              komplett bei der Zielsuche (siehe TOWER_TYPES.tesla-Kommentar oben).
@@ -80,7 +83,7 @@ const UNIT_TYPES = {
   icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 11, flying: true, incomeBoostRate: 0.05 },
   titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
 };
-const GUARD_APEX_HEAL_PCT_PER_SEC = 0.80;
+const GUARD_APEX_HEAL_PCT_PER_SEC = 0.08;
 
 // Einheiten-Upgrades: UNIT_MAX_TIER 50 → 10 (Nachtrag, Stern-Kompression - siehe TOWER_MAX_TIER-
 // Kommentar in balance-shared.js für die volle Begründung; auf Nutzerentscheidung "Türme + Einheiten"
@@ -223,7 +226,7 @@ const AI_PROFILES = {
     reserveGoldRatio: 0.30,
     targetMinesBase: 3, targetMinesPerBossRound: 0.5,
     targetTowersBase: 6, targetTowersPerBossRound: 1.0,
-    towerWeights: { arrow: 0.55, frost: 0.30, cannon: 0.15 },
+    towerWeights: { arrow: 0.45, frost: 0.25, cannon: 0.15, booster: 0.15 },
     unitWeights: { sprinter: 0.45, guard: 0.30, icecube: 0.15, brecher: 0.10 },
     // Wirtschaft zuerst (wie gefordert), danach Verteidigung, Angriffs-Tech zuletzt.
     techPriority: ['economy', 'defense', 'attack'],
@@ -244,7 +247,7 @@ const AI_PROFILES = {
     reserveGoldRatio: 0.15,
     targetMinesBase: 3, targetMinesPerBossRound: 0.4,
     targetTowersBase: 8, targetTowersPerBossRound: 1.2,
-    towerWeights: { arrow: 0.45, frost: 0.30, cannon: 0.25 },
+    towerWeights: { arrow: 0.40, frost: 0.25, cannon: 0.20, booster: 0.15 },
     unitWeights: { sprinter: 0.35, guard: 0.25, icecube: 0.20, brecher: 0.20 },
     // Verteidigung zuerst (wie gefordert - stabile eigene Basis trotz aggressivem Spiel), dann Angriff.
     techPriority: ['defense', 'attack', 'economy'],
@@ -265,7 +268,7 @@ const AI_PROFILES = {
     reserveGoldRatio: 0.05,
     targetMinesBase: 5, targetMinesPerBossRound: 0.6,
     targetTowersBase: 10, targetTowersPerBossRound: 1.5,
-    towerWeights: { arrow: 0.40, frost: 0.30, cannon: 0.30 }, // Basiswerte, werden adaptiv überschrieben
+    towerWeights: { arrow: 0.35, frost: 0.25, cannon: 0.25, booster: 0.15 }, // Basiswerte, werden adaptiv überschrieben
     unitWeights: { sprinter: 0.30, guard: 0.20, icecube: 0.25, brecher: 0.25 }, // s.o.
     techPriority: null,
     techBuyThresholdGold: 400,
