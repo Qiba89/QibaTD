@@ -87,19 +87,18 @@
     font-size: 12px; cursor: pointer; background: var(--accent2); color: #04201d;
   }
 
-  #game { display: grid; width: 100%; padding: 12px; position: relative; grid-template-columns: 1fr 200px 1fr auto; gap: 12px; grid-template-rows: auto auto auto auto; }
+  #game { display: none; flex-direction: column; align-items: center; width: 100%; }
 
-  .stat-bars { display: flex; gap: 12px; margin: 0; width: 100%; flex-direction: row; grid-column: 1 / 4; grid-row: 1; }
+  .stat-bars { display: flex; gap: 12px; margin-bottom: 12px; width: 100%; max-width: 720px; }
   .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
   .stat-card.mine { border-color: var(--accent2); }
   .stat-card.theirs { border-color: var(--accent); }
   .stat-card b { color: var(--accent); }
   .stat-card .label { font-size: 11px; color: #aab3bd; display: block; margin-bottom: 2px; }
-  .stat-card.theirs { grid-column: 1 / 4; grid-row: 4; }
   #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
   #connStatus.online { color: #7cd992; }
 
-  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin: 0; grid-column: 2; grid-row: 3; align-self: center; }
+  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin-bottom: 10px; }
   #myShieldIndicator { color: #4fd1c5; font-weight: 700; }
 
   .tech-branch { margin-bottom: 14px; }
@@ -119,9 +118,7 @@
   .tech-node .tech-desc { flex: 1; }
   .tech-node .tech-cost { font-size: 10px; color: var(--accent); white-space: nowrap; }
 
-  .lanes { display: contents; }
-  .lane-block:first-child { grid-column: 1; grid-row: 3; }
-  .lane-block:last-child { grid-column: 3; grid-row: 3; }
+  .lanes { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
   .flash-overlay {
     position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
@@ -137,8 +134,8 @@
   #myCanvas { cursor: pointer; }
   #oppCanvas { cursor: default; }
 
-  .controls { display: flex; gap: 8px; flex-direction: column; width: 220px; grid-column: 4; grid-row: 1 / 4; overflow-y: auto; }
-  .panel { background: var(--panel); border-radius: 10px; padding: 12px; width: 220px; border: 1px solid #2c333c; }
+  .controls { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; max-width: 720px; }
+  .panel { background: var(--panel); border-radius: 10px; padding: 14px; width: 220px; border: 1px solid #2c333c; }
 
   .pick-btn {
     display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; margin-bottom: 8px;
@@ -522,12 +519,12 @@
   <div class="lanes" style="display:none;">
     <div class="lane-block">
       <div class="lane-label">🛡️ Deine Verteidigung — hier baust du Türme &amp; Minen</div>
-      <canvas id="myCanvas" width="1360" height="320"></canvas>
+      <canvas id="myCanvas" width="2720" height="640"></canvas>
       <div class="flash-overlay" id="myFlash"></div>
     </div>
     <div class="lane-block">
       <div class="lane-label">🎯 Gegner-Verteidigung — hierhin schickst du Einheiten</div>
-      <canvas id="oppCanvas" width="1360" height="320"></canvas>
+      <canvas id="oppCanvas" width="2720" height="640"></canvas>
       <div class="flash-overlay" id="oppFlash"></div>
     </div>
   </div>
@@ -669,7 +666,7 @@
 // Balancing-Werte (Türme, Einheiten, Bosse, Tech-Tree, Tier-Skalierung)
 // stecken jetzt in js/balance-shared.js und js/balance-multiplayer.js
 // (siehe <script>-Tags oben) statt inline hier — siehe docs/balancing.md.
-const CELL = 80;
+const CELL = 160;
 const LANE_COLS = 17, LANE_ROWS = 4, PATH_ROW = 2;
 const LANE_W = LANE_COLS * CELL, LANE_H = LANE_ROWS * CELL;
 const PATH_Y = PATH_ROW * CELL + CELL / 2;
@@ -825,7 +822,7 @@ function mpDrawSpr(ctx, key, cx, cy, targetW) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
   const h = targetW * (rec.h / rec.w);
-  ctx.drawImage(rec.img, cx - targetW / 2, cy - h, targetW, h);
+  ctx.drawImage(rec.img, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
@@ -835,7 +832,7 @@ function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h, targetW, h);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
@@ -1023,7 +1020,7 @@ function joinRoomFromList(code) {
 
 function enterGame() {
   document.getElementById('lobby').style.display = 'none';
-  document.getElementById('game').style.display = 'grid';
+  document.getElementById('game').style.display = 'flex';
   document.getElementById('meLabel').textContent = isHost ? 'DU (Spieler 1)' : 'DU (Spieler 2)';
   document.getElementById('oppLabel').textContent = aiMode
     ? `GEGNER (KI – ${AI_PROFILES[aiDifficulty].label})`
@@ -1563,7 +1560,7 @@ function tickBossSpawn(dt) {
   if (state.bossTimer <= 0) {
     state.bossRound++;
     state.bossTimer = BOSS_INTERVAL_MS;
-    const hp = Math.round(BOSS_BASE_HP * Math.pow(BOSS_HP_GROWTH, state.bossRound - 1) * 1.1);
+    const hp = Math.round(BOSS_BASE_HP * Math.pow(BOSS_HP_GROWTH, state.bossRound - 1) * 1.3);
     const bossIndex = Math.min(10, state.bossRound); // Levels 1-10, dann bleibt es bei 10
     const mk = () => ({ id: nextEntityId++, hp, maxHp: hp, speed: BOSS_SPEED, radius: BOSS_RADIUS, color: '#e63946', flying: false, isBoss: true, bossIndex, x: 0, y: PATH_Y, slowUntil: 0 });
     state.unitsOnLaneP1.push(mk());
@@ -2220,13 +2217,13 @@ function drawLane(ctx, structures, units, projectiles) {
     ctx.stroke();
   }
   structures.forEach(t => {
-    const radius = t.type === 'mine' ? 24 : 28;
+    const radius = t.type === 'mine' ? 12 : 14;
     // Nachtrag (Teil 11, "Tower sprites hinzufügen"): echtes Sprite statt Kreis für die 3 Turmarten
     // mit vorhandenem Bildmaterial (arrow/cannon/frost, siehe MP_TOWER_SPRITE_PREFIX weiter oben) -
     // vollständiger Fallback auf die bisherige Kreis-Optik, falls Bild (noch) nicht geladen ist oder
     // die Turmart keinen Sprite-Satz hat (tesla/mine).
     const spritePrefix = MP_TOWER_SPRITE_PREFIX[t.type];
-    const spriteDrawn = spritePrefix && mpDrawSpr(ctx, spritePrefix + '_L' + mpTowerSpriteStage(t.tier), t.x, t.y, radius * 5.2);
+    const spriteDrawn = spritePrefix && mpDrawSpr(ctx, spritePrefix + '_L' + mpTowerSpriteStage(t.tier), t.x, t.y, radius * 2.6);
     if (!spriteDrawn) {
       ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
@@ -2245,10 +2242,8 @@ function drawLane(ctx, structures, units, projectiles) {
     // icecube->flugeinheit und titan->boss). Sprite-Stufe = u.tier (0-10, 1:1 dieselbe Skala wie die
     // 10 Lauf-Sprite-Level), mindestens Stufe 1 (es gibt kein *_L0_walk-Bild). Fallback auf die
     // bisherige Kreis-Optik, falls Bild (noch) nicht geladen oder u.key keiner Kategorie zugeordnet ist.
-    // Nachtrag (Teil 13+, Boss-Assets): isBoss-Gegner nutzen direkt boss_L{bossIndex}_walk statt
-    // MP_UNIT_VISUAL_KIND-Zuordnung.
-    const visKind = u.isBoss ? 'boss' : MP_UNIT_VISUAL_KIND[u.key];
-    const visLevel = u.isBoss ? u.bossIndex : Math.max(1, Math.min(10, u.tier || 0));
+    const visKind = MP_UNIT_VISUAL_KIND[u.key];
+    const visLevel = Math.max(1, Math.min(10, u.tier || 0));
     const targetW = u.radius * (visKind === 'boss' ? 3.4 : 2.8);
     const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, u.y, targetW, mpWalkAnimFrame);
     if (!spriteDrawn) {
