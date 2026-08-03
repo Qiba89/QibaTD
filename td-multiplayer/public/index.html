@@ -2167,7 +2167,31 @@ const ASSET_FILES = {
   obj_tent1: 'obj_tent1.png', obj_tent2: 'obj_tent2.png', obj_lamppost: 'obj_lamppost.png', obj_tree: 'obj_tree.png',
   tower_arrow_L1: 'tower_arrow_L1.png', tower_arrow_L2: 'tower_arrow_L2.png', tower_arrow_L3: 'tower_arrow_L3.png',
   tower_arrow_L4: 'tower_arrow_L4.png', tower_arrow_L5: 'tower_arrow_L5.png',
+  // Nachtrag (Teil 9, auf Nutzeranfrage "als nächstes fügen wir die tower hinzu ... es gibt nur 5
+  // sprites von den towern, das heißt für jeden level sprite gelten im spiel 2 level"): 3 weitere
+  // Turmarten bekommen jetzt dieselbe 5-Stufen-Sprite-Evolution wie der Pfeilturm seit Teil 3
+  // (Formel siehe TOWER_SPRITE_STAGE() unten). Freigestellt aus `QibaTDsprites/towers/{kanone,
+  // frostturm,booster}/level_0{1-5}.png` - bei kanone/level_05 lag (anders als die übrigen 19
+  // Dateien, die bereits sauber transparent waren) wieder ein fest eingebrannter Karo-/Rausch-
+  // Hintergrund vor, per Sättigungs-Schwellwert + randverbundenem Flood-Fill entfernt (etablierte
+  // Pipeline aus Teil 3/6). Tesla-Turm bewusst NOCH NICHT dabei - im Ordner liegen bisher nur 2 von
+  // 5 Stufen UND deren Hintergrund ist ein unregelmäßiges Rausch-/Marmor-Muster statt eines
+  // sauberen Karos, das sich mit der bisherigen Methode nicht zuverlässig freistellen ließ (siehe
+  // docs/visuals.md, Teil 9) - Titan-Turm hat noch gar kein Bildmaterial. Beide bleiben bei der
+  // bisherigen prozeduralen Kreis-Optik, bis passendes Material nachgeliefert wird.
+  tower_cannon_L1: 'tower_cannon_L1.png', tower_cannon_L2: 'tower_cannon_L2.png', tower_cannon_L3: 'tower_cannon_L3.png',
+  tower_cannon_L4: 'tower_cannon_L4.png', tower_cannon_L5: 'tower_cannon_L5.png',
+  tower_frost_L1: 'tower_frost_L1.png', tower_frost_L2: 'tower_frost_L2.png', tower_frost_L3: 'tower_frost_L3.png',
+  tower_frost_L4: 'tower_frost_L4.png', tower_frost_L5: 'tower_frost_L5.png',
+  tower_booster_L1: 'tower_booster_L1.png', tower_booster_L2: 'tower_booster_L2.png', tower_booster_L3: 'tower_booster_L3.png',
+  tower_booster_L4: 'tower_booster_L4.png', tower_booster_L5: 'tower_booster_L5.png',
 };
+// Nachtrag (Teil 9): die Tier(0-10)->Sprite-Stufe(1-5)-Formel aus Teil 3 (bisher nur inline beim
+// Pfeilturm) als benannte, wiederverwendbare Funktion - jetzt von mehreren Turmarten genutzt.
+function TOWER_SPRITE_STAGE(tier) { return Math.min(5, Math.floor(tier / 2) + 1); }
+// Turmtyp -> Sprite-Key-Präfix, nur für Typen mit echtem Sprite-Satz (siehe ASSET_FILES oben).
+// Fehlt ein Typ hier (aktuell tesla/titan), bleibt er beim bisherigen prozeduralen Look.
+const TOWER_SPRITE_PREFIX = { arrow: 'tower_arrow', cannon: 'tower_cannon', frost: 'tower_frost', booster: 'tower_booster' };
 // Nachtrag (auf Nutzeranfrage "kannst du die mit Bewegungsanimation einbinden?"): der Nutzer hat für
 // alle 4 normalen Gegnertypen UND den Boss einen vollständigen 10-Stufen-Satz eigener Grafiken
 // nachgeliefert - jede Stufe als 4-Frame-Lauf-Spritesheet (gleiches Format wie zuvor nur der
@@ -3194,15 +3218,17 @@ function draw() {
     ctx.arc(t.x, t.y, glowR, 0, Math.PI*2);
     ctx.fill();
 
-    // Nachtrag (Steampunk-Carnival-Sprites): der Pfeilturm bekommt eine echte 5-Stufen-Sprite-
-    // Evolution (tower_arrow_L1..L5, tier 0-10 -> Stage 1-5) - die einzige der 6 Turm-Reihen im
-    // Moodboard, die durchgängig sauber/konsistent war (siehe docs/visuals.md, "Was NICHT
-    // eingearbeitet ist"). Alle anderen 5 Turmarten bleiben bei der bisherigen prozeduralen
-    // Kreis-Darstellung, mit demselben Fallback-Mechanismus falls das Sprite (noch) nicht bereit ist.
+    // Nachtrag (Steampunk-Carnival-Sprites, erweitert in Teil 9): jede Turmart mit einem Eintrag in
+    // TOWER_SPRITE_PREFIX bekommt eine echte 5-Stufen-Sprite-Evolution (tier 0-10 -> Stage 1-5, siehe
+    // TOWER_SPRITE_STAGE() oben) - ursprünglich nur der Pfeilturm (Teil 3), jetzt zusätzlich Kanone,
+    // Frostturm und Booster-Turm (Teil 9). Tesla/Titan haben (noch) keinen Sprite-Satz und bleiben
+    // bei der bisherigen prozeduralen Kreis-Darstellung, mit demselben Fallback-Mechanismus falls
+    // ein Sprite (noch) nicht bereit ist.
     let spriteDrawn = false;
-    if (t.type === 'arrow') {
-      const stage = Math.min(5, Math.floor(t.tier / 2) + 1);
-      spriteDrawn = drawSpr('tower_arrow_L' + stage, t.x, t.y, radius * 2.6);
+    const spritePrefix = TOWER_SPRITE_PREFIX[t.type];
+    if (spritePrefix) {
+      const stage = TOWER_SPRITE_STAGE(t.tier);
+      spriteDrawn = drawSpr(spritePrefix + '_L' + stage, t.x, t.y, radius * 2.6);
     }
     if (!spriteDrawn) {
       ctx.beginPath();
