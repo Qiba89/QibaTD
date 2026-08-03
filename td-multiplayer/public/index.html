@@ -2100,19 +2100,32 @@ const ROWS = canvas.height / CELL;
 // welche Elemente bewusst NICHT übernommen wurden (die 5 anderen Turmtypen - siehe dort, Abschnitt
 // "Was noch offen ist"). Jedes Bild lädt einzeln und asynchron; jede Zeichenstelle prüft `ready` und
 // fällt automatisch auf den alten prozeduralen Look zurück, falls ein Bild (noch) nicht da ist.
+// Nachtrag ("wild durcheinander"-Fix): terrain_construction/terrain_flowerbeds und road_4 wurden
+// entfernt - die Terrain-Zufallsmischung ist einer einheitlichen Gras-Fläche gewichen (siehe unten,
+// "Rest = Wiese") und road_4 (Kreuzung) wird durch die jetzt richtungsabhängig gedrehte road_1-Kurve
+// ersetzt (siehe ROAD_TILE_INFO unten) - beide Dateien bleiben unangetastet in assets/, falls sie
+// später wieder gebraucht werden.
 const ASSET_FILES = {
-  enemy_sprinter: 'enemy_sprinter.png', enemy_guard: 'enemy_guard.png',
-  enemy_brecher: 'enemy_brecher.png', enemy_flugeinheit: 'enemy_flugeinheit.png',
-  boss_monkey_walk: 'boss_monkey_walk.png',
-  boss_L2: 'boss_L2.png', boss_L3: 'boss_L3.png', boss_L4: 'boss_L4.png', boss_L5: 'boss_L5.png',
-  boss_L6: 'boss_L6.png', boss_L7: 'boss_L7.png', boss_L8: 'boss_L8.png', boss_L9: 'boss_L9.png', boss_L10: 'boss_L10.png',
   terrain_grass: 'terrain_grass.png', terrain_cobblestone: 'terrain_cobblestone.png',
-  terrain_construction: 'terrain_construction.png', terrain_flowerbeds: 'terrain_flowerbeds.png',
-  road_1: 'road_1.png', road_4: 'road_4.png',
+  road_1: 'road_1.png',
   obj_tent1: 'obj_tent1.png', obj_tent2: 'obj_tent2.png', obj_lamppost: 'obj_lamppost.png', obj_tree: 'obj_tree.png',
   tower_arrow_L1: 'tower_arrow_L1.png', tower_arrow_L2: 'tower_arrow_L2.png', tower_arrow_L3: 'tower_arrow_L3.png',
   tower_arrow_L4: 'tower_arrow_L4.png', tower_arrow_L5: 'tower_arrow_L5.png',
 };
+// Nachtrag (auf Nutzeranfrage "kannst du die mit Bewegungsanimation einbinden?"): der Nutzer hat für
+// alle 4 normalen Gegnertypen UND den Boss einen vollständigen 10-Stufen-Satz eigener Grafiken
+// nachgeliefert - jede Stufe als 4-Frame-Lauf-Spritesheet (gleiches Format wie zuvor nur der
+// Affen-Boss). Bei den 4 Gegnertypen ist Stufe 1-10 eine echte Stärke-Eskalation DERSELBEN Figur
+// (z. B. wird der Guard von Stufe 1 zu 10 sichtbar schwerer gepanzert) - beim Boss sind die 10
+// Stufen dagegen 10 UNTERSCHIEDLICHE Charaktere (wie schon die alten boss_L1..L10-Icons, jetzt aber
+// alle animiert statt nur der Affe). Ersetzt komplett die vorherigen statischen
+// enemy_*/boss_L2..L10-Einzelbilder - siehe docs/visuals.md, Teil 4.
+const ENEMY_WALK_TYPES = ['sprinter', 'guard', 'brecher', 'flugeinheit', 'boss'];
+ENEMY_WALK_TYPES.forEach(t => {
+  for (let lvl = 1; lvl <= 10; lvl++) {
+    ASSET_FILES[t + '_L' + lvl + '_walk'] = t + '_L' + lvl + '_walk.png';
+  }
+});
 const SPR = {};
 Object.keys(ASSET_FILES).forEach(key => {
   const img = new Image();
@@ -2140,12 +2153,13 @@ function drawSprExact(key, dx, dy, dw, dh) {
   ctx.drawImage(rec.img, dx, dy, dw, dh);
   return true;
 }
-// drawMonkeyWalk(): die 4-Frame-Lauf-/Trommel-Animation des ersten Bosses (Welle 5) - ein
-// horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3) kommt aus dem globalen
-// `bossAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf. vervielfachten
-// Spielgeschwindigkeit - siehe updateEffects()).
-function drawMonkeyWalk(cx, cy, targetW, frameIdx) {
-  const rec = SPR.boss_monkey_walk;
+// drawWalkAnim(): generische 4-Frame-Lauf-Animation für JEDE Gegner-/Boss-Sprite-Stufe (ursprünglich
+// nur für den Affen-Boss geschrieben, jetzt für alle Gegnertypen×Stufen wiederverwendet - siehe
+// ENEMY_WALK_TYPES oben). Horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3)
+// kommt aus dem globalen `walkAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf.
+// vervielfachten Spielgeschwindigkeit - siehe updateEffects()).
+function drawWalkAnim(key, cx, cy, targetW, frameIdx) {
+  const rec = SPR[key];
   if (!rec || !rec.ready) return false;
   const fw = rec.w / 4, fh = rec.h;
   const h = targetW * (fh / fw);
@@ -2159,11 +2173,12 @@ function cellRandom(c, r, salt) {
   const x = Math.sin(c * 127.1 + r * 311.7 + salt * 74.7) * 43758.5453;
   return x - Math.floor(x);
 }
-// Boss-Animations-Takt (Nachtrag): läuft mit dem echten Frame-dt in updateEffects() (siehe dort),
-// bewusst getrennt von gameSpeedMultiplier - sonst würde die Trommel-Animation bei 5x/10x Tempo
-// unlesbar schnell durchrauschen, obwohl sie rein optisch ist.
-let bossAnimAccum = 0;
-let bossAnimFrame = 0;
+// Lauf-Animations-Takt (Nachtrag, jetzt für ALLE animierten Gegner/Bosse gemeinsam statt nur den
+// Affen-Boss - ein einzelner geteilter Takt reicht, da rein kosmetisch): läuft mit dem echten
+// Frame-dt in updateEffects() (siehe dort), bewusst getrennt von gameSpeedMultiplier - sonst würde
+// die Lauf-Animation bei 5x/10x Tempo unlesbar schnell durchrauschen, obwohl sie rein optisch ist.
+let walkAnimAccum = 0;
+let walkAnimFrame = 0;
 
 // Nachtrag (Balance-Fix, auf Nutzeranfrage, analog zum Multiplayer-Pendant): der Kettenblitz sprang
 // bisher nur innerhalb einer festen Sprungreichweite zum nächsten fliegenden Ziel - jetzt uneinge-
@@ -2179,6 +2194,35 @@ const pathCells = [
 ];
 const waypoints = pathCells.map(([c,r]) => ({x: c*CELL + CELL/2, y: r*CELL + CELL/2}));
 const pathSet = new Set(pathCells.map(([c,r]) => `${c},${r}`));
+// Nachtrag (auf Nutzeranfrage "wege tiles für den Weg, für den Rest wiese - die tiles waren wild
+// durcheinander"): einmal beim Laden berechnete Richtungsinfo pro Pfad-Zelle, damit draw() bei
+// geraden Wegstücken eine einfache Steinkachel und bei Kurven die Kurven-Kachel PASSEND GEDREHT
+// zeichnen kann, statt wie vorher überall dieselbe ungedrehte Kurve zu verwenden (das sah an
+// geraden Stücken kaputt/zufällig aus). `pathCells` ist eine geordnete Folge von der Wellen-Quelle
+// bis zum Ziel - für jede Zelle ergibt der Vorgänger/Nachfolger in dieser Liste, aus welcher
+// Richtung der Weg kommt und wohin er weiterführt.
+const ROAD_TILE_INFO = new Map();
+pathCells.forEach(([c, r], i) => {
+  const dirs = new Set();
+  const prev = pathCells[i - 1];
+  const next = pathCells[i + 1];
+  if (prev) dirs.add(prev[0] < c ? 'left' : prev[0] > c ? 'right' : prev[1] < r ? 'up' : 'down');
+  if (next) dirs.add(next[0] < c ? 'left' : next[0] > c ? 'right' : next[1] < r ? 'up' : 'down');
+  const hasH = dirs.has('left') || dirs.has('right');
+  const hasV = dirs.has('up') || dirs.has('down');
+  let info;
+  if (hasH && hasV) {
+    // Ecke: road_1.png verbindet im Original (0°) "oben" und "links" - siehe docs/visuals.md.
+    // Rotation im Uhrzeigersinn dreht diese Verbindung entsprechend weiter.
+    if (dirs.has('up') && dirs.has('left')) info = { corner: true, rotation: 0 };
+    else if (dirs.has('up') && dirs.has('right')) info = { corner: true, rotation: 90 };
+    else if (dirs.has('down') && dirs.has('right')) info = { corner: true, rotation: 180 };
+    else info = { corner: true, rotation: 270 }; // down + left
+  } else {
+    info = { corner: false }; // gerades Stück (oder Anfang/Ende des Wegs)
+  }
+  ROAD_TILE_INFO.set(`${c},${r}`, info);
+});
 
 let gold = 220;
 let lives = 20;
@@ -2478,10 +2522,10 @@ function updateStats() {
 // betrifft NUR das Aussehen, keine Balance-Werte). `bossIndex` (nur für isBoss) wählt analog, welcher
 // der 10 Boss-Charaktere gezeichnet wird - siehe makeWaveEnemies() für die Herleitung aus der Welle.
 function pushEnemy(list, opts) {
-  const { hp, speed, radius, color, reward, isBoss = false, flying = false, fast = false, shieldHits = 0, visualKind = 'guard', bossIndex = 0 } = opts;
+  const { hp, speed, radius, color, reward, isBoss = false, flying = false, fast = false, shieldHits = 0, visualKind = 'guard', bossIndex = 0, visualLevel = 1 } = opts;
   list.push({
     hp, maxHp: hp, speed, baseSpeed: speed, radius, color, reward,
-    isBoss: !!isBoss, flying: !!flying, fast: !!fast, shieldHits, maxShieldHits: shieldHits, visualKind, bossIndex,
+    isBoss: !!isBoss, flying: !!flying, fast: !!fast, shieldHits, maxShieldHits: shieldHits, visualKind, bossIndex, visualLevel,
     wpIndex: 0, x: waypoints[0].x, y: waypoints[0].y, slowUntil: 0,
   });
 }
@@ -2497,30 +2541,37 @@ function makeWaveEnemies(w) {
   // Gegnertypen dieser Welle gleichermaßen (auch den Boss selbst), siehe enemyShieldHitsForWave() in
   // balance-singleplayer.js.
   const shieldHits = enemyShieldHitsForWave(w);
+  // Nachtrag (auf Nutzeranfrage "mit Bewegungsanimation einbinden"): der Nutzer hat für jeden der 4
+  // Gegnertypen 10 Stärke-Stufen als animierte Lauf-Sprites geliefert (siehe ENEMY_WALK_TYPES oben) -
+  // Stufe 10 ist sichtbar schwerer gepanzert/bedrohlicher als Stufe 1 (gleiche Figur, andere Rüstung).
+  // visualLevel wächst mit der Wellenzahl (alle 5 Wellen +1, wie beim Boss-Wechsel) und deckelt bei
+  // 10 - rein kosmetisch, betrifft keine der tatsächlichen Balance-Werte (HP/Speed/etc. skalieren
+  // weiterhin stufenlos über baseHp(w) usw.).
+  const visualLevel = Math.min(10, Math.ceil(w / 5));
 
   if (type === 'swarm') {
     const cnt = Math.round(baseCount(w) * SWARM_COUNT_MULT);
     const hp = hp0 * SWARM_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits, visualKind: 'sprinter' });
+      pushEnemy(list, { hp, speed: speed * 1.15, radius: 8, color: '#ffd166', reward: Math.round(kg * SWARM_HP_MULT), fast: true, shieldHits, visualKind: 'sprinter', visualLevel });
     }
   } else if (type === 'relief') {
     const cnt = baseCount(w);
     const hp = hp0 * POST_BOSS_RELIEF_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits, visualKind: 'brecher' });
+      pushEnemy(list, { hp, speed, radius: 10, color: '#7cd992', reward: Math.round(kg), shieldHits, visualKind: 'brecher', visualLevel });
     }
   } else if (type === 'boss') {
     const cnt = Math.round(baseCount(w) * 0.7);
     const escortHp = hp0 * BOSS_ESCORT_HP_MULT;
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits, visualKind: 'brecher' });
+      pushEnemy(list, { hp: escortHp, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg * BOSS_ESCORT_HP_MULT), shieldHits, visualKind: 'brecher', visualLevel });
     }
     // Boss spawns last -> arrives at the end of the wave
     // Nachtrag (Steampunk-Carnival-Sprites): bossIndex zyklisch 1-10 ueber die Boss-Wellen (w%5===0),
-    // damit jede 5. Welle eine der 10 verfuegbaren Boss-Grafiken zeigt. Boss #1 (Welle 5) nutzt in
-    // draw() bewusst die animierte Affen-Trommel-Grafik statt des statischen boss_L1-Icons, siehe
-    // drawMonkeyWalk() oben.
+    // damit jede 5. Welle eine der 10 verfuegbaren Boss-Charaktere zeigt (jetzt alle animiert, siehe
+    // drawWalkAnim() oben) - anders als visualLevel oben ist das KEINE Stärke-Eskalation derselben
+    // Figur, sondern 10 verschiedene Charaktere (Affe, Hund, Eule, Kanonenwagen, ...).
     const bIdx = ((Math.floor(w / 5) - 1) % 10) + 1;
     const bHp = Math.round(hp0 * bossMult(w));
     pushEnemy(list, { hp: bHp, speed: speed * 0.4, radius: 24, color: '#e63946', reward: Math.round(kg * bossMult(w)), isBoss: true, shieldHits, bossIndex: bIdx });
@@ -2534,12 +2585,12 @@ function makeWaveEnemies(w) {
     // Gleiche Anzahl wie eine normale Welle (baseCount(w)).
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits, visualKind: 'flugeinheit' });
+      pushEnemy(list, { hp: hp0 * 0.8, speed: speed * 1.1, radius: 9, color: '#38bdf8', reward: Math.round(kg * 1.1), flying: true, fast: true, shieldHits, visualKind: 'flugeinheit', visualLevel });
     }
   } else { // normal
     const cnt = baseCount(w);
     for (let i = 0; i < cnt; i++) {
-      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits, visualKind: 'guard' });
+      pushEnemy(list, { hp: hp0, speed, radius: 10, color: '#ff5e5e', reward: Math.round(kg), shieldHits, visualKind: 'guard', visualLevel });
     }
   }
 
@@ -2688,10 +2739,10 @@ function updateEffects(dt) {
     screenShake.time -= dt;
     if (screenShake.time <= 0) { screenShake.time = 0; screenShake.mag = 0; }
   }
-  // Boss-Lauf-/Trommel-Animation (4 Frames, siehe drawMonkeyWalk() oben) - 150ms pro Frame, mit dem
-  // echten Frame-dt statt der Spielgeschwindigkeit.
-  bossAnimAccum += dt;
-  if (bossAnimAccum >= 150) { bossAnimAccum -= 150; bossAnimFrame = (bossAnimFrame + 1) % 4; }
+  // Lauf-Animation aller Gegner/Bosse (4 Frames, siehe drawWalkAnim() oben) - 150ms pro Frame, mit
+  // dem echten Frame-dt statt der Spielgeschwindigkeit.
+  walkAnimAccum += dt;
+  if (walkAnimAccum >= 150) { walkAnimAccum -= 150; walkAnimFrame = (walkAnimFrame + 1) % 4; }
 }
 
 function damageEnemy(enemy, dmg) {
@@ -2937,13 +2988,14 @@ function draw() {
   // Pfad-Set (`pathSet`) wird einmal vorab gebaut, damit die Terrain-Schleife pro Zelle nur einen
   // schnellen Set-Lookup statt einer linearen pathCells-Suche braucht.
   const pathSet = new Set(pathCells.map(([c,r]) => c + ',' + r));
-  const TERRAIN_VARIANTS = ['terrain_grass', 'terrain_grass', 'terrain_grass', 'terrain_cobblestone', 'terrain_construction', 'terrain_flowerbeds'];
-  // grass grid
+  // Nachtrag (auf Nutzeranfrage "die tiles waren wild durcheinander... für den Rest Wiese"): nur
+  // noch Gras für alle Nicht-Weg-Zellen, statt eines zufälligen Mixes aus Gras/Kopfstein/Baustelle/
+  // Blumenbeet - der Materialwechsel wirkte unruhig/planlos. Klar getrennt: Weg = Steinkacheln
+  // (siehe unten), alles andere = durchgehend Gras.
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       if (pathSet.has(c + ',' + r)) continue; // Pfad-Zellen werden unten separat gezeichnet
-      const variant = TERRAIN_VARIANTS[Math.floor(cellRandom(c, r, 1) * TERRAIN_VARIANTS.length)];
-      if (!drawSprExact(variant, c*CELL, r*CELL, CELL, CELL)) {
+      if (!drawSprExact('terrain_grass', c*CELL, r*CELL, CELL, CELL)) {
         ctx.fillStyle = (r+c)%2===0 ? '#232a33' : '#212831';
         ctx.fillRect(c*CELL, r*CELL, CELL, CELL);
       }
@@ -2965,11 +3017,26 @@ function draw() {
   }
   // path (Nachtrag, visuelle Aufwertung: statt einer flachen Einheitsfarbe jetzt ein Verlauf +
   // dezente helle Kante, damit der Weg mehr wie ein befestigter Pfad statt wie eine einfarbige
-  // Zellauswahl wirkt - siehe docs/visuals.md; Nachtrag Steampunk-Carnival: mit Sprite-Kachel, falls
-  // geladen)
+  // Zellauswahl wirkt - siehe docs/visuals.md; Nachtrag "wild durcheinander"-Fix: an Kurven wird die
+  // road_1-Kachel jetzt passend gedreht (siehe ROAD_TILE_INFO oben), an geraden Stücken eine
+  // schlichte Steinkachel (dasselbe Material wie die Kurve, aber ohne die Schienen-Grafik, die dort
+  // fehl am Platz wirkt) - beides mit Fallback auf den alten Verlauf, falls Bilder fehlen.
   pathCells.forEach(([c,r]) => {
     const x = c*CELL, y = r*CELL;
-    if (drawSprExact('road_1', x, y, CELL, CELL)) return;
+    const info = ROAD_TILE_INFO.get(c + ',' + r);
+    let drawn;
+    if (info && info.corner) {
+      ctx.save();
+      ctx.translate(x + CELL / 2, y + CELL / 2);
+      ctx.rotate(info.rotation * Math.PI / 180);
+      const rec = SPR.road_1;
+      drawn = rec && rec.ready;
+      if (drawn) ctx.drawImage(rec.img, -CELL / 2, -CELL / 2, CELL, CELL);
+      ctx.restore();
+    } else {
+      drawn = drawSprExact('terrain_cobblestone', x, y, CELL, CELL);
+    }
+    if (drawn) return;
     const grad = ctx.createLinearGradient(x, y, x, y + CELL);
     grad.addColorStop(0, '#454b54');
     grad.addColorStop(1, '#33383f');
@@ -3058,21 +3125,17 @@ function draw() {
     ctx.ellipse(e.x, e.y + e.radius * 0.7, e.radius * 0.9, e.radius * 0.35, 0, 0, Math.PI*2);
     ctx.fill();
 
-    // Nachtrag (Steampunk-Carnival-Sprites): Gegner-Sprite statt flachem Kreis, falls geladen -
-    // visualKind (siehe pushEnemy()/makeWaveEnemies()) mappt die 5 Welle-Generator-Zweige auf die 4
-    // verfügbaren Kreatur-Grafiken; Bosse nutzen bossIndex (1 = animierter Affe/Trommel-Boss #1,
-    // per Nutzerwunsch, 2-10 = statische Boss-Icons aus dem Moodboard). Fallback auf den bisherigen
-    // Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
+    // Nachtrag (auf Nutzeranfrage "mit Bewegungsanimation einbinden"): animiertes Lauf-Sprite statt
+    // flachem Kreis, falls geladen - visualKind (siehe pushEnemy()/makeWaveEnemies()) mappt die 5
+    // Welle-Generator-Zweige auf die 4 verfügbaren Kreatur-Grafiken; visualLevel (1-10, wächst mit
+    // der Wellenzahl, siehe makeWaveEnemies()) wählt die Stärke-Ausbaustufe. Bosse nutzen stattdessen
+    // bossIndex (1-10, zyklisch pro Boss-Welle) für 10 unterschiedliche Boss-Charaktere. Fallback auf
+    // den bisherigen Kreis, falls das jeweilige Bild (noch) nicht bereit ist.
     let spriteDrawn = false;
     if (e.isBoss) {
-      if (e.bossIndex === 1) {
-        spriteDrawn = drawMonkeyWalk(e.x, e.y, e.radius * 3.4, bossAnimFrame);
-      } else if (e.bossIndex >= 2) {
-        spriteDrawn = drawSpr('boss_L' + e.bossIndex, e.x, e.y, e.radius * 3.4);
-      }
-    } else {
-      const enemySpriteKey = { sprinter: 'enemy_sprinter', guard: 'enemy_guard', brecher: 'enemy_brecher', flugeinheit: 'enemy_flugeinheit' }[e.visualKind];
-      if (enemySpriteKey) spriteDrawn = drawSpr(enemySpriteKey, e.x, e.y, e.radius * 2.8);
+      spriteDrawn = drawWalkAnim('boss_L' + e.bossIndex + '_walk', e.x, e.y, e.radius * 3.4, walkAnimFrame);
+    } else if (e.visualKind) {
+      spriteDrawn = drawWalkAnim(e.visualKind + '_L' + e.visualLevel + '_walk', e.x, e.y, e.radius * 2.8, walkAnimFrame);
     }
     if (!spriteDrawn) {
       ctx.beginPath();
