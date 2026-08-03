@@ -77,11 +77,11 @@ const DEFAULT_INCOME_BOOST_RATE = 0.10;
 //  - icecube:  bei Vollausbau nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
 //              komplett bei der Zielsuche (siehe TOWER_TYPES.tesla-Kommentar oben).
 const UNIT_TYPES = {
-  sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 8 },
-  guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 10 },
-  brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 14 },
-  icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 11, flying: true, incomeBoostRate: 0.05 },
-  titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 16, requiresTech: { branch: 'attack', tier: 4 } },
+  sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 16 },
+  guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 20 },
+  brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 28 },
+  icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 22, flying: true, incomeBoostRate: 0.05 },
+  titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 32, requiresTech: { branch: 'attack', tier: 4 } },
 };
 const GUARD_APEX_HEAL_PCT_PER_SEC = 0.08;
 
@@ -127,7 +127,7 @@ const BOSS_INTERVAL_MS = 90000; // alle 90s
 const BOSS_BASE_HP = 900;
 const BOSS_HP_GROWTH = 1.3; // pro Boss-Runde
 const BOSS_SPEED = 40;
-const BOSS_RADIUS = 20;
+const BOSS_RADIUS = 40;
 const BOSS_LEAK_LIVES = 3; // Lebenskosten, falls der Boss durchkommt
 
 // ── Tech-Tree: 3 Zweige, je 4 Stufen, linear (Tier N braucht Tier N-1) ──
