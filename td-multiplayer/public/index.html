@@ -682,6 +682,154 @@ function cellFromPixel(x, y) { return { c: Math.floor(x / CELL), r: Math.floor(y
 function cellCenter(c, r) { return { x: c * CELL + CELL / 2, y: r * CELL + CELL / 2 }; }
 function isBuildable(c, r) { return c >= 0 && r >= 0 && c < LANE_COLS && r < LANE_ROWS && r !== PATH_ROW; }
 
+// ── Map-Tiles für die Multiplayer-Lane (Teil 10, auf Nutzeranfrage "dann werden wir die
+// Multiplayermap mit Maptiles versehen. Achte auf den Weg, dass das Wegtiles genau nach der
+// Ausrichtung sind. für die Umliegend tiles nehmen wir Geländetiles die zueinander passen") ─────
+// Eigene, MP-lokale Kopie der SP-Sprite-Infrastruktur (ASSET_FILES/SPR/drawSpr*, siehe zweiter
+// <script>-Block weiter unten) - NICHT wiederverwendbar, weil dieser erste Script-Block VOR dem
+// SP-Block ausgeführt wird UND SP seine gesamte Infrastruktur in einer IIFE kapselt (bewusst, um
+// SP/MP strikt getrennt zu halten - siehe bisherige Teile). Referenziert dieselben Bilddateien in
+// assets/ (der Browser cached sie, also kein doppelter Netzwerk-Download), aber über einen eigenen
+// `MP_SPR`-Bildcache und mit `ctx` als explizitem Parameter statt eines geschlossenen globalen `ctx`
+// - passend zum bestehenden Stil von drawLane(ctx, ...), das pro Spielfeld (eigenes/gegnerisches
+// Canvas) einmal aufgerufen wird.
+//
+// Die MP-Lane hat nur EINE gerade Pfad-Reihe (PATH_ROW, über die volle Breite) - anders als die
+// SP-Karte (Teil 6) also KEINE Kurven, keine Sockel-Logik nötig. Fürs Gelände: dieselbe Erkenntnis
+// wie in Teil 7 (siehe docs/tileset.md, "Warum EIN Hintergrundbild statt Einzelkacheln") - das
+// `gelände 2.png`-Motiv ist ein zusammenhängendes Bild, keine frei kombinierbaren Einzelkacheln.
+// Statt es wie in SP auf die 3:2-Fläche zu croppen, passt für die MP-Lane (680×160px, 4,25:1 sehr
+// breit/flach) ein anderer Ausschnitt: die mittlere "Zahnrad-/Laternen-Gasse" des Bildes ist selbst
+// schon ein durchgehendes horizontales Band - als "cover"-Ausschnitt auf die MP-Lane passt sie ohne
+// erkennbare Bruchstellen (siehe Vorschau-Crop während der Umsetzung).
+const MP_ASSET_FILES = {
+  terrain_plaza: 'terrain_plaza.png',
+  way_ew_a: 'way_ew_a.png', way_ew_b: 'way_ew_b.png',
+};
+// Nachtrag (Teil 11): das Befüllen von MP_SPR (Bild-Ladevorgänge anstoßen) passiert jetzt erst WEITER
+// UNTEN, NACHDEM alle MP_ASSET_FILES-Einträge (inkl. der Turm-/Einheiten-Sprites aus Teil 11) gesetzt
+// sind - vorher lief die Schleife direkt hier und hätte alle später per `MP_ASSET_FILES.xyz = ...`
+// nachträglich hinzugefügten Einträge (siehe unten) schlicht verpasst.
+// mpDrawSprExact(): identisch zu SPs drawSprExact() - füllt exakt dx/dy/dw/dh, für die
+// Weg-Kacheln, die genau eine Lane-Zelle (CELL×CELL) ausfüllen sollen.
+function mpDrawSprExact(ctx, key, dx, dy, dw, dh) {
+  const rec = MP_SPR[key];
+  if (!rec || !rec.ready) return false;
+  ctx.drawImage(rec.img, dx, dy, dw, dh);
+  return true;
+}
+// mpDrawSprCover(): identisch zu SPs drawSprCover() (CSS "background-size: cover"-Logik) - für den
+// Gelände-Hintergrund, der als ein Stück die komplette Lane-Fläche abdeckt statt gekachelt zu werden.
+function mpDrawSprCover(ctx, key, dx, dy, dw, dh) {
+  const rec = MP_SPR[key];
+  if (!rec || !rec.ready) return false;
+  const srcAspect = rec.w / rec.h, dstAspect = dw / dh;
+  let sx, sy, sw, sh;
+  if (srcAspect > dstAspect) { sh = rec.h; sw = sh * dstAspect; sx = (rec.w - sw) / 2; sy = 0; }
+  else { sw = rec.w; sh = sw / dstAspect; sy = (rec.h - sh) / 2; sx = 0; }
+  ctx.drawImage(rec.img, sx, sy, sw, sh, dx, dy, dw, dh);
+  return true;
+}
+// Deterministische Pseudo-Zufallszahl aus der Spalte - für die a/b-Varianten-Wahl der geraden
+// Weg-Kacheln (analog zu SPs cellRandom()), damit eine lange gerade Strecke nicht komplett
+// identisch aussieht, die Wahl aber pro Spalte stabil bleibt (kein Frame-zu-Frame-Geflacker).
+function mpCellRandom(c, salt) {
+  const x = Math.sin(c * 127.1 + salt * 74.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+// Pro Spalte vorberechnete Weg-Kachel-Variante - die gesamte PATH_ROW ist eine gerade Ost-West-
+// Strecke über die volle Breite (kein Sockel-Muster nötig, siehe isBuildable() oben: einzige Regel
+// ist "r !== PATH_ROW").
+const MP_WAY_EW_VARIANTS = ['way_ew_a', 'way_ew_b'];
+const MP_PATH_TILE_KEY = [];
+for (let c = 0; c < LANE_COLS; c++) {
+  MP_PATH_TILE_KEY[c] = MP_WAY_EW_VARIANTS[Math.floor(mpCellRandom(c, 5) * MP_WAY_EW_VARIANTS.length)];
+}
+
+// ── Einheiten- & Turm-Sprites für die MP-Lane (Teil 11, auf Nutzeranfrage "Ferner sollen im
+// Multiplayer alle Einheiten und Tower sprites hinzugefügt werden") ────────────────────────────
+// Turm-Sprites: dieselben 4 Sorten wie im Endlos-Modus (Teil 3/9) - `arrow`/`cannon`/`frost` gibt
+// es in beiden Modi unter demselben Namen, `booster` existiert in MP gar nicht (siehe TOWER_TYPES
+// in js/balance-multiplayer.js: nur arrow/cannon/frost/tesla/mine) und wird deshalb hier nicht
+// gelistet. Tesla und Mine bleiben wie in SP bei der Kreis-Optik (kein Sprite-Material).
+MP_ASSET_FILES.tower_arrow_L1 = 'tower_arrow_L1.png'; MP_ASSET_FILES.tower_arrow_L2 = 'tower_arrow_L2.png';
+MP_ASSET_FILES.tower_arrow_L3 = 'tower_arrow_L3.png'; MP_ASSET_FILES.tower_arrow_L4 = 'tower_arrow_L4.png';
+MP_ASSET_FILES.tower_arrow_L5 = 'tower_arrow_L5.png';
+MP_ASSET_FILES.tower_cannon_L1 = 'tower_cannon_L1.png'; MP_ASSET_FILES.tower_cannon_L2 = 'tower_cannon_L2.png';
+MP_ASSET_FILES.tower_cannon_L3 = 'tower_cannon_L3.png'; MP_ASSET_FILES.tower_cannon_L4 = 'tower_cannon_L4.png';
+MP_ASSET_FILES.tower_cannon_L5 = 'tower_cannon_L5.png';
+MP_ASSET_FILES.tower_frost_L1 = 'tower_frost_L1.png'; MP_ASSET_FILES.tower_frost_L2 = 'tower_frost_L2.png';
+MP_ASSET_FILES.tower_frost_L3 = 'tower_frost_L3.png'; MP_ASSET_FILES.tower_frost_L4 = 'tower_frost_L4.png';
+MP_ASSET_FILES.tower_frost_L5 = 'tower_frost_L5.png';
+const MP_TOWER_SPRITE_PREFIX = { arrow: 'tower_arrow', cannon: 'tower_cannon', frost: 'tower_frost' };
+function mpTowerSpriteStage(tier) { return Math.min(5, Math.floor(tier / 2) + 1); } // identisch zur SP-Formel (Teil 3/9)
+
+// Einheiten-Sprites: MPs 5 Einheitentypen (sprinter/guard/brecher/icecube/titan, siehe UNIT_TYPES in
+// js/balance-multiplayer.js) sind KEINE 1:1-Entsprechung zu SPs 5 animierten Gegner-Kategorien
+// (sprinter/guard/brecher/flugeinheit/boss, siehe ENEMY_WALK_TYPES in Teil 4) - 3 davon passen exakt
+// (gleicher Name UND gleiches Konzept: eine Figur, die pro Stufe stärker/gepanzerter aussieht), die
+// übrigen 2 brauchen eine bewusste Zuordnungs-Entscheidung:
+//  - icecube (MPs einzige fliegende Einheit) -> flugeinheit (SPs einzige fliegende Gegner-Kategorie) -
+//    konzeptionell die naheliegendste Wahl.
+//  - titan (MPs Tech-gated Elite-Einheit, NICHT zu verwechseln mit SPs Titan-TURM) -> boss. Einzige
+//    verbleibende SP-Kategorie, aber mit einer Einschränkung: SPs boss_L1..L10_walk sind (anders als
+//    die anderen 4 Typen) 10 UNTERSCHIEDLICHE Charaktere statt einer einzelnen eskalierenden Figur
+//    (siehe docs/visuals.md, Teil 4) - ein hochgestufter Titan wechselt sein Aussehen also bei jedem
+//    Tier-Aufstieg komplett, statt (wie bei den anderen 4 Typen) sichtbar stärker zu wirken. Mangels
+//    dediziertem Titan-Bildmaterial die einzig sinnvolle Option; siehe docs/visuals.md, Teil 11,
+//    "Weiteres Vorgehen" - offen für Nutzer-Feedback.
+const MP_UNIT_VISUAL_KIND = { sprinter: 'sprinter', guard: 'guard', brecher: 'brecher', icecube: 'flugeinheit', titan: 'boss' };
+for (let lvl = 1; lvl <= 10; lvl++) {
+  ['sprinter', 'guard', 'brecher', 'flugeinheit', 'boss'].forEach(kind => {
+    MP_ASSET_FILES[kind + '_L' + lvl + '_walk'] = kind + '_L' + lvl + '_walk.png';
+  });
+}
+// Jetzt, wo alle MP_ASSET_FILES-Einträge (Gelände/Weg aus Teil 10 + Türme/Einheiten aus Teil 11)
+// feststehen, die Bild-Ladevorgänge tatsächlich anstoßen (siehe Hinweis weiter oben bei der
+// MP_ASSET_FILES-Deklaration).
+const MP_SPR = {};
+Object.keys(MP_ASSET_FILES).forEach(key => {
+  const img = new Image();
+  const rec = { img, ready: false, w: 0, h: 0 };
+  img.onload = () => { rec.ready = true; rec.w = img.naturalWidth; rec.h = img.naturalHeight; };
+  img.onerror = () => { rec.ready = false; };
+  img.src = 'assets/' + MP_ASSET_FILES[key];
+  MP_SPR[key] = rec;
+});
+// mpDrawSpr(): identisch zu SPs drawSpr() - zentriert auf (cx,cy), Zielbreite targetW, Seiten-
+// verhältnis bleibt erhalten (für die Turm-Sprites, die kein Spritesheet sind).
+function mpDrawSpr(ctx, key, cx, cy, targetW) {
+  const rec = MP_SPR[key];
+  if (!rec || !rec.ready) return false;
+  const h = targetW * (rec.h / rec.w);
+  ctx.drawImage(rec.img, cx - targetW / 2, cy - h / 2, targetW, h);
+  return true;
+}
+// mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
+// expliziter Parameter (statt geschlossenem globalen ctx wie in SP) passend zum drawLane(ctx,...)-Stil.
+function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
+  const rec = MP_SPR[key];
+  if (!rec || !rec.ready) return false;
+  const fw = rec.w / 4, fh = rec.h;
+  const h = targetW * (fh / fw);
+  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  return true;
+}
+// Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
+// aus draw() (siehe dort) - MP hat (anders als SP) kein 1x/2x/5x/10x-Spieltempo, trotzdem bewusst
+// über einen eigenen Timer statt direkt an die Render-Framerate gekoppelt, damit die Lauf-Animation
+// bei stark schwankender Framerate (z.B. Gast-Interpolation) gleichmäßig bleibt.
+let mpWalkAnimAccum = 0;
+let mpWalkAnimFrame = 0;
+let mpWalkAnimLastTs = null;
+function mpUpdateWalkAnim() {
+  const now = performance.now();
+  if (mpWalkAnimLastTs === null) { mpWalkAnimLastTs = now; return; }
+  mpWalkAnimAccum += now - mpWalkAnimLastTs;
+  mpWalkAnimLastTs = now;
+  while (mpWalkAnimAccum >= 150) { mpWalkAnimAccum -= 150; mpWalkAnimFrame = (mpWalkAnimFrame + 1) % 4; }
+}
+
 // ── Rollen & Verbindung ──────────────────────────────────────────────────
 let roomCode = null;
 let myRole = null; // 'p1' (Host) oder 'p2' (Gast)
@@ -2001,9 +2149,23 @@ function updateUIFromState() {
 
 function drawLane(ctx, structures, units, projectiles) {
   ctx.clearRect(0, 0, LANE_W, LANE_H);
-  for (let r = 0; r < LANE_ROWS; r++) for (let c = 0; c < LANE_COLS; c++) {
-    ctx.fillStyle = (r === PATH_ROW) ? '#3a3f47' : ((r + c) % 2 === 0 ? '#232a33' : '#212831');
-    ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+  // Nachtrag (Teil 10, "Multiplayermap mit Maptiles versehen"): echte Kachel-Grafiken statt der
+  // bisherigen flachen Schachbrett-/Einfarb-Optik, mit vollständigem Fallback auf den alten Look,
+  // falls ein Bild (noch) nicht geladen ist - siehe MP_ASSET_FILES/mpDrawSpr*() weiter oben.
+  if (!mpDrawSprCover(ctx, 'terrain_plaza', 0, 0, LANE_W, LANE_H)) {
+    for (let r = 0; r < LANE_ROWS; r++) for (let c = 0; c < LANE_COLS; c++) {
+      if (r === PATH_ROW) continue;
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
+      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+    }
+  }
+  // Weg (gerade Ost-West-Strecke über die volle Breite, siehe MP_PATH_TILE_KEY weiter oben) - wird
+  // wie in SP (Teil 6) über den Gelände-Hintergrund gezeichnet.
+  for (let c = 0; c < LANE_COLS; c++) {
+    const x = c * CELL, y = PATH_ROW * CELL;
+    if (mpDrawSprExact(ctx, MP_PATH_TILE_KEY[c], x, y, CELL, CELL)) continue;
+    ctx.fillStyle = '#3a3f47';
+    ctx.fillRect(x, y, CELL, CELL);
   }
   // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
   // bei vielen Türmen unübersichtlich. Jetzt nur noch für den aktuell ausgewählten Turm, dafür mit
@@ -2019,8 +2181,16 @@ function drawLane(ctx, structures, units, projectiles) {
   }
   structures.forEach(t => {
     const radius = t.type === 'mine' ? 12 : 14;
-    ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
+    // Nachtrag (Teil 11, "Tower sprites hinzufügen"): echtes Sprite statt Kreis für die 3 Turmarten
+    // mit vorhandenem Bildmaterial (arrow/cannon/frost, siehe MP_TOWER_SPRITE_PREFIX weiter oben) -
+    // vollständiger Fallback auf die bisherige Kreis-Optik, falls Bild (noch) nicht geladen ist oder
+    // die Turmart keinen Sprite-Satz hat (tesla/mine).
+    const spritePrefix = MP_TOWER_SPRITE_PREFIX[t.type];
+    const spriteDrawn = spritePrefix && mpDrawSpr(ctx, spritePrefix + '_L' + mpTowerSpriteStage(t.tier), t.x, t.y, radius * 2.6);
+    if (!spriteDrawn) {
+      ctx.beginPath(); ctx.fillStyle = darkenColor(t.color, t.tier); ctx.arc(t.x, t.y, radius, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#10151b'; ctx.lineWidth = 2; ctx.stroke();
+    }
     // Minen zeigen jetzt (wie Türme) den Level-Stern statt eines "$"-Zeichens — konsistente
     // Optik über alle Strukturen hinweg, Level-Fortschritt bei Minen war vorher unsichtbar.
     drawLevelStars(ctx, t.x, t.y, t.tier);
@@ -2030,7 +2200,18 @@ function drawLane(ctx, structures, units, projectiles) {
     }
   });
   units.forEach(u => {
-    ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
+    // Nachtrag (Teil 11, "alle Einheiten ... sprites hinzugefügt werden"): echte Lauf-Animation statt
+    // Kreis, über MP_UNIT_VISUAL_KIND (siehe weiter oben für die Zuordnungs-Begründung, insbesondere
+    // icecube->flugeinheit und titan->boss). Sprite-Stufe = u.tier (0-10, 1:1 dieselbe Skala wie die
+    // 10 Lauf-Sprite-Level), mindestens Stufe 1 (es gibt kein *_L0_walk-Bild). Fallback auf die
+    // bisherige Kreis-Optik, falls Bild (noch) nicht geladen oder u.key keiner Kategorie zugeordnet ist.
+    const visKind = MP_UNIT_VISUAL_KIND[u.key];
+    const visLevel = Math.max(1, Math.min(10, u.tier || 0));
+    const targetW = u.radius * (visKind === 'boss' ? 3.4 : 2.8);
+    const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, u.y, targetW, mpWalkAnimFrame);
+    if (!spriteDrawn) {
+      ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, u.y, u.radius, 0, Math.PI * 2); ctx.fill();
+    }
     if (u.flying) {
       ctx.beginPath(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
       ctx.arc(u.x, u.y, u.radius + 3, 0, Math.PI * 2); ctx.stroke();
@@ -2056,6 +2237,7 @@ function interpolateList(prevList, currList, t) {
 
 function draw() {
   if (!state) return;
+  mpUpdateWalkAnim(); // Teil 11: Lauf-Animations-Takt einmal pro Render-Frame weiterschalten
   const myCtx = document.getElementById('myCanvas').getContext('2d');
   const oppCtx = document.getElementById('oppCanvas').getContext('2d');
 
