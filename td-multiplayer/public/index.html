@@ -87,19 +87,55 @@
     font-size: 12px; cursor: pointer; background: var(--accent2); color: #04201d;
   }
 
-  #game { display: grid; width: 100%; padding: 12px; position: relative; grid-template-columns: 1fr 200px 1fr auto; gap: 12px; grid-template-rows: auto auto auto auto; }
+  #game {
+    display: grid;
+    width: 100%;
+    padding: 12px;
+    position: relative;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    grid-template-rows: auto auto auto auto auto;
+  }
 
-  .stat-bars { display: flex; gap: 12px; margin: 0; width: 100%; flex-direction: row; grid-column: 1 / 4; grid-row: 1; }
-  .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
+  /* Nachtrag: Layout-Fix - Statusfenster über/unter den Spielfeldern, Build-Panel rechts bündig */
+  .stat-bars {
+    display: flex;
+    gap: 12px;
+    margin: 0;
+    width: 100%;
+    flex-direction: row;
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .stat-card {
+    flex: 1;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 14px;
+    border: 1px solid #2c333c;
+  }
   .stat-card.mine { border-color: var(--accent2); }
   .stat-card.theirs { border-color: var(--accent); }
   .stat-card b { color: var(--accent); }
   .stat-card .label { font-size: 11px; color: #aab3bd; display: block; margin-bottom: 2px; }
-  .stat-card.theirs { grid-column: 1 / 4; grid-row: 4; }
+  .stat-card.theirs {
+    grid-column: 1;
+    grid-row: 5;
+  }
   #connStatus { font-size: 11px; color: #aab3bd; margin-bottom: 8px; }
   #connStatus.online { color: #7cd992; }
 
-  #bossTimerBar { font-size: 12px; color: #ff9f43; text-align: center; margin: 0; grid-column: 2; grid-row: 3; align-self: center; }
+  #bossTimerBar {
+    font-size: 12px;
+    color: #ff9f43;
+    text-align: center;
+    margin: 0;
+    grid-column: 1;
+    grid-row: 3;
+    align-self: center;
+    padding: 8px;
+  }
   #myShieldIndicator { color: #4fd1c5; font-weight: 700; }
 
   .tech-branch { margin-bottom: 14px; }
@@ -120,8 +156,14 @@
   .tech-node .tech-cost { font-size: 10px; color: var(--accent); white-space: nowrap; }
 
   .lanes { display: contents; }
-  .lane-block:first-child { grid-column: 1; grid-row: 3; }
-  .lane-block:last-child { grid-column: 3; grid-row: 3; }
+  .lane-block:first-child {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .lane-block:last-child {
+    grid-column: 1;
+    grid-row: 4;
+  }
   .lane-block { background: var(--panel); border-radius: 10px; padding: 8px; border: 1px solid #2c333c; position: relative; }
   .flash-overlay {
     position: absolute; top: 8px; left: 8px; right: 8px; bottom: 8px;
@@ -137,7 +179,15 @@
   #myCanvas { cursor: pointer; }
   #oppCanvas { cursor: default; }
 
-  .controls { display: flex; gap: 8px; flex-direction: column; width: 220px; grid-column: 4; grid-row: 1 / 4; overflow-y: auto; }
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-direction: column;
+    width: 220px;
+    grid-column: 2;
+    grid-row: 1 / 6;
+    overflow-y: auto;
+  }
   .panel { background: var(--panel); border-radius: 10px; padding: 12px; width: 220px; border: 1px solid #2c333c; }
 
   .pick-btn {
