@@ -11,8 +11,7 @@ import {
   baseIncomeFor, mineIncomeMultFor, rangeMultFor, grossIncomeFor, interestIncomeFor, taxIncomeFor
 } from './mpEconomy.js';
 import {
-  MP_ASSET_FILES, mpDrawSprExact, MP_GROUND_TILE_SCALE, mpDrawGroundTileBand, mpCellRandom,
-  MP_GROUND_BAND_TILES, MP_BAND_GROUPS, MP_TOWER_SPRITE_PREFIX, mpTowerSpriteStage,
+  mpDrawSprExact, MP_TOWER_SPRITE_PREFIX, mpTowerSpriteStage,
   MP_UNIT_VISUAL_KIND, MP_SPR, mpDrawSpr, mpDrawWalkAnim, mpWalkAnimFrame, mpUpdateWalkAnim
 } from './mpAssets.js';
 
@@ -24,32 +23,15 @@ import {
 // entfernt (siehe moveProjectiles() unten) - die einzige verbleibende Grenze ist die Sprunganzahl
 // (teslaChainJumps()) und dass jedes Ziel nur einmal pro Schuss getroffen wird.
 
-// ── Map-Tiles für die Multiplayer-Lane (Teil 10, auf Nutzeranfrage "dann werden wir die
-// Multiplayermap mit Maptiles versehen. Achte auf den Weg, dass das Wegtiles genau nach der
-// Ausrichtung sind. für die Umliegend tiles nehmen wir Geländetiles die zueinander passen") ─────
-// Eigene, MP-lokale Kopie der SP-Sprite-Infrastruktur (ASSET_FILES/SPR/drawSpr*, siehe zweiter
-// <script>-Block weiter unten) - NICHT wiederverwendbar, weil dieser erste Script-Block VOR dem
-// SP-Block ausgeführt wird UND SP seine gesamte Infrastruktur in einer IIFE kapselt (bewusst, um
-// SP/MP strikt getrennt zu halten - siehe bisherige Teile). Referenziert dieselben Bilddateien in
-// assets/ (der Browser cached sie, also kein doppelter Netzwerk-Download), aber über einen eigenen
-// `MP_SPR`-Bildcache und mit `ctx` als explizitem Parameter statt eines geschlossenen globalen `ctx`
-// - passend zum bestehenden Stil von drawLane(ctx, ...), das pro Spielfeld (eigenes/gegnerisches
-// Canvas) einmal aufgerufen wird.
-//
-// Die MP-Lane hat nur EINE gerade Pfad-Reihe (PATH_ROW, über die volle Breite) - anders als die
-// SP-Karte (Teil 6) also KEINE Kurven, keine Sockel-Logik nötig.
-//
-// Nachtrag (Teil 13, Map-Redesign auf Nutzeranfrage, 2026-08-03): löst das alte Teil-12-Layout ab.
-// `ground_r2c1`/`ground_r2c2` sind die "Wege"-Kacheln (180×180px nativ, 3×3 Zellen groß bei
-// MP_GROUND_TILE_SCALE = 3×CELL/180) und decken jetzt DIREKT die unteren 3 der 4 Lane-Reihen ab
-// (Reihen 1-3, 0-indiziert - inkl. der Pfad-Reihe PATH_ROW=2 mittendrin) - das ist exakt die native
-// 3-Zeilen-Kachelhöhe, also OHNE Zuschnitt. Spaltenweise in 3er-Gruppen (MP_BAND_GROUPS): erste UND
-// letzte Gruppe `ground_r2c2`, alle Gruppen dazwischen `ground_r2c1`, wie vom Nutzer vorgegeben.
-// Reihe 0 (oberste) bleibt bewusst frei von den Wege-Kacheln - dort wird nur das UNTERE Drittel von
-// `ground_r1c2`/`ground_r1c3` im Wechsel gezeigt (`mpDrawGroundTileBand(..., 'bottom')`, dieselbe
-// 3er-Spaltengruppierung). Ersetzt damit auch den bisherigen separaten Pfad-Overlay (nur noch
-// `ground_r2c1` pro Zelle) aus Teil 12 - der ist jetzt redundant, weil die Pfad-Optik längst Teil der
-// großen `ground_r2c1`/`r2c2`-Kacheln ist.
+// ── Map-Hintergrund für die Multiplayer-Lane ────────────────────────────
+// Nachtrag (Steampunk-Wüsten-Redesign, auf Nutzeranfrage, 2026-08-04): löst das alte
+// Kachel-Band-Layout (ground_r1c2/r2c1/r2c2, MP_BAND_GROUPS) ab. Statt mehrerer kleiner,
+// wiederholter Terrain-Kacheln wird jetzt EIN einziges, durchgehendes Szenenbild
+// (mp_lane_bg, siehe MP_ASSET_FILES in mpAssets.js) über die komplette Lane gezeichnet -
+// beim Zuschnitt wurde die Schienen-Reihe im Bild gezielt auf PATH_ROW ausgerichtet (siehe
+// drawLane() unten). Die alten Kachel-Assets/Helfer (mpDrawGroundTileBand, MP_BAND_GROUPS,
+// MP_GROUND_TILE_SCALE, MP_GROUND_BAND_TILES, mpCellRandom) bleiben ungenutzt in mpAssets.js
+// erhalten, falls das Terrain später doch wieder kachelbasiert werden soll.
 
 // ── Rollen & Verbindung ──────────────────────────────────────────────────
 let roomCode = null;
@@ -1349,32 +1331,17 @@ function updateUIFromState() {
 
 function drawLane(ctx, structures, units, projectiles) {
   ctx.clearRect(0, 0, LANE_W, LANE_H);
-  // Nachtrag (Teil 13, Map-Redesign auf Nutzeranfrage, 2026-08-03 - siehe ausführlicher Kommentar bei
-  // MP_ASSET_FILES weiter oben): `ground_r2c1`/`ground_r2c2` ("Wege"-Kacheln, 3×3 Zellen groß) decken
-  // jetzt als EIN zusammenhängender Block die Reihen 1-3 ab (0-indiziert - passt exakt zur nativen
-  // 3-Zeilen-Kachelhöhe, inkl. Pfad-Reihe PATH_ROW=2 mittendrin, kein separater Weg-Overlay mehr
-  // nötig). Spaltenweise in 3er-Gruppen (MP_BAND_GROUPS): erste und letzte Gruppe `ground_r2c2`, alle
-  // dazwischen `ground_r2c1`. Reihe 0 bleibt frei davon - dort nur das untere Drittel von
-  // `ground_r1c2`/`ground_r1c3` im Wechsel (dieselbe Gruppierung). Vollständiger Fallback auf die
-  // alte Schachbrett-Optik pro Zelle, falls ein Bild (noch) nicht geladen ist.
-  const lastGroupIdx = MP_BAND_GROUPS.length - 1;
-  MP_BAND_GROUPS.forEach((g, i) => {
-    const gx = g.c0 * CELL, gw = g.cols * CELL;
-    const wegeTileKey = (i === 0 || i === lastGroupIdx) ? 'ground_r2c2' : 'ground_r2c1';
-    if (!mpDrawGroundTileBand(ctx, wegeTileKey, gx, 1 * CELL, gw, 3 * CELL)) {
-      for (let r = 1; r < LANE_ROWS; r++) for (let c = g.c0; c < g.c0 + g.cols; c++) {
-        ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
-        ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-      }
+  // Nachtrag (Steampunk-Wüsten-Redesign, auf Nutzeranfrage, 2026-08-04): das bisherige
+  // Kachel-Band-System (ground_r1c2/r2c1/r2c2, siehe Git-Historie) ist ersetzt durch EIN
+  // einziges Hintergrundbild (mp_lane_bg, siehe MP_ASSET_FILES in mpAssets.js), das exakt
+  // LANE_W×LANE_H deckt - die Schienen im Bild wurden beim Zuschnitt gezielt auf PATH_ROW
+  // ausgerichtet. Fallback (Bild noch nicht geladen): alte Schachbrett-Optik.
+  if (!mpDrawSprExact(ctx, 'mp_lane_bg', 0, 0, LANE_W, LANE_H)) {
+    for (let r = 0; r < LANE_ROWS; r++) for (let c = 0; c < LANE_COLS; c++) {
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#232a33' : '#212831';
+      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
     }
-    const topTileKey = MP_GROUND_BAND_TILES[i % MP_GROUND_BAND_TILES.length];
-    if (!mpDrawGroundTileBand(ctx, topTileKey, gx, 0, gw, CELL, 'bottom')) {
-      for (let c = g.c0; c < g.c0 + g.cols; c++) {
-        ctx.fillStyle = c % 2 === 0 ? '#232a33' : '#212831';
-        ctx.fillRect(c * CELL, 0, CELL, CELL);
-      }
-    }
-  });
+  }
   // Nachtrag (auf Nutzeranfrage): Reichweiten-Kreis wurde vorher für ALLE Türme dauerhaft gezeichnet -
   // bei vielen Türmen unübersichtlich. Jetzt nur noch für den aktuell ausgewählten Turm, dafür mit
   // einem Rahmen, damit der Kreis trotz der dünnen Füllung gut erkennbar bleibt.

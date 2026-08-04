@@ -6,6 +6,13 @@ import { CELL, LANE_COLS } from './mpConstants.js';
 export const MP_ASSET_FILES = {
   ground_r1c2: 'ground_r1c2.png', ground_r1c3: 'ground_r1c3.png',
   ground_r2c1: 'ground_r2c1.png', ground_r2c2: 'ground_r2c2.png',
+  // Nachtrag (Steampunk-Wüsten-Redesign, auf Nutzeranfrage, 2026-08-04): EIN einziges
+  // durchgehendes Szenenbild statt der bisherigen Kachel-Bänder darüber - passt exakt
+  // LANE_W×LANE_H (1360×320px), die Schienen-Reihe im Bild wurde vorher gezielt so
+  // zugeschnitten, dass sie exakt auf PATH_ROW (Reihe 3, 0-indiziert Reihe 2) landet.
+  // Gezeichnet über mpDrawSprExact() (siehe drawLane()), Fallback auf die alte
+  // Kachel-/Schachbrett-Logik bleibt erhalten, falls das Bild (noch) nicht geladen ist.
+  mp_lane_bg: 'mp_lane_bg.png',
 };
 // Nachtrag (Teil 11): das Befüllen von MP_SPR (Bild-Ladevorgänge anstoßen) passiert jetzt erst WEITER
 // UNTEN, NACHDEM alle MP_ASSET_FILES-Einträge (inkl. der Turm-/Einheiten-Sprites aus Teil 11) gesetzt
