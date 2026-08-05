@@ -147,7 +147,12 @@ function drawLevelStars(ctx, x, y, tier) {
 // 🌀-Icon, der Tooltip-Text unterscheidet über `auraTarget`, worauf die Aura wirkt (Gegner
 // verlangsamen vs. Türme verstärken).
 function towerTargetIconsHtml(t) {
-  if (t.kind === 'aura') {
+  // Nachtrag (2026-08-05, im Zuge des Booster-Bugfixes entdeckt): MP-Auren (TOWER_TYPES.booster/
+  // frost in balance-multiplayer.js) nutzen `aura: true` statt SPs `kind: 'aura'` (SP_TOWER_TYPES in
+  // balance-singleplayer.js) - diese Funktion prüfte bisher NUR `t.kind`, wodurch der MP-Bau-Panel
+  // für Booster/Frost fälschlich die Boden/Luft-Zielicons zeigte (👣✈️) statt des 🌀-Auren-Icons,
+  // obwohl beide Türme nie feuern. Jetzt akzeptiert diese Funktion beide Konventionen.
+  if (t.kind === 'aura' || t.aura) {
     const label = t.auraTarget === 'towers' ? 'Aura: verstärkt Türme im Radius' : 'Aura: verlangsamt Gegner im Radius, kontinuierlich, kein Projektil';
     return `<span class="target-icon" title="${label}">🌀</span>`;
   }

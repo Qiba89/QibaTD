@@ -34,7 +34,10 @@ const TOWER_TYPES = {
   // anvisieren kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt
   // "Tesla-Turm".
   tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 500, airOnly: true },
-  booster: { name: 'Booster',   cost: 80,  range: 120, aura: true, color: '#fbbf24' },
+  // `auraTarget: 'towers'` (Nachtrag, siehe towerTargetIconsHtml()-Fix in balance-shared.js): ohne
+  // diesen Wert zeigte das Tooltip fälschlich den "verlangsamt Gegner"-Text (SPs Default für Auren
+  // ohne explizites auraTarget) statt "verstärkt Türme im Radius".
+  booster: { name: 'Booster',   cost: 80,  range: 120, aura: true, auraTarget: 'towers', color: '#fbbf24' },
   // Kosten 60 → 100: bei 60 war die Amortisationszeit (10s bis der Grund-Ertrag von 6 Gold/s die
   // Kosten wieder reingeholt hat) zu kurz - eine Mine war praktisch risikofrei sofort im Vorteil.
   // Bei 100 sind es ~16.7s Amortisation, spürbar mehr Risiko/Opportunitätskosten (das Gold hätte in
@@ -43,6 +46,37 @@ const TOWER_TYPES = {
   mine:   { name: 'Mine',      cost: 100, color: '#ffd166' },
 };
 const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'booster', 'mine'];
+
+// Bugfix + neues Feature (2026-08-05, User-Feedback "Booster zeigt ab Level 3 kein Wheel für
+// Upgrades"): beim Nachforschen zeigte sich, dass der Booster-Turm in Multiplayer bis hierhin
+// GAR KEINE Wirkung hatte - `TOWER_TYPES.booster` hat kein `damage`/`fireRate` (nur reine Aura-
+// Türme), fireTowers() (mpCore.js) versuchte ihn trotzdem wie einen Kampfturm zu feuern, bekam
+// dabei überall NaN (undefined*Zahl) und der Turm tat schlicht nichts - kein tatsächlicher Boost
+// für nahe Türme existierte im Code (anders als im Singleplayer, wo `boosterBuffFor()` in
+// spCore.js genau das schon lange leistet). Jetzt nachgebaut, MP-eigene Konstanten (bewusst
+// dieselben Werte wie SP_BOOSTER_* in balance-singleplayer.js, für gleiches Spielgefühl in beiden
+// Modi - aber als eigene MP_-Konstanten statt eine Abhängigkeit auf SP-Code zu bauen).
+const MP_BOOSTER_DAMAGE_BUFF_BASE = 0.15, MP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER = 0.05, MP_BOOSTER_DAMAGE_BUFF_CAP = 0.50;
+const MP_BOOSTER_FIRERATE_BUFF_BASE = 0.10, MP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER = 0.04, MP_BOOSTER_FIRERATE_BUFF_CAP = 0.35;
+// Booster-Spezialisierung (User-Idee, im Anschluss an die Stealther-Balancing-Diskussion: "der
+// Turm Booster bekommt ab level 3 eine Spezialisierung, über ein Wheel kann man eine Auswählen").
+// Ab BOOSTER_SPEC_TIER öffnet sich EINMALIG (siehe checkBoosterSpecPrompts() in mpCore.js) ein
+// Wheel (dieselbe Komponente wie das Bau-Wheel, js/shared/buildWheel.js) zur Wahl EINER
+// permanenten Zusatz-Fähigkeit, die zum normalen Schaden/Feuerrate-Boost oben ADDITIV dazukommt
+// (kein Ersatz dafür) - Türme in der Aura eines spezialisierten Boosters bekommen also weiterhin
+// den normalen Boost UND den Spezial-Effekt. `vision` ist der Konter gegen die neue unsichtbare
+// Einheit Stealther (siehe UNIT_TYPES.stealther) - ohne einen spezialisierten Booster in der Nähe
+// bleibt Stealther für JEDEN Turm unsichtbar, siehe fireTowers()-Kommentar dort.
+const BOOSTER_SPEC_TIER = 3;
+const BOOSTER_SPEC_RANGE_BONUS = 0.20;   // 'range': +20% Reichweite für Türme in der Aura
+const BOOSTER_SPEC_SPLASH_BONUS = 0.30;  // 'splash': +30% Explosionsradius für Türme in der Aura
+const BOOSTER_SPEC_CHAIN_BONUS = 1;      // 'chain': +1 Tesla-Kettensprung für Tesla-Türme in der Aura
+const BOOSTER_SPECIALIZATIONS = {
+  vision: { name: 'Vision', icon: '👁️', sub: 'Deckt Stealth-Einheiten in der Aura auf' },
+  range: { name: 'Fernrohr', icon: '🔭', sub: `+${Math.round(BOOSTER_SPEC_RANGE_BONUS * 100)}% Reichweite (Türme in Aura)` },
+  splash: { name: 'Sprengverstärker', icon: '💥', sub: `+${Math.round(BOOSTER_SPEC_SPLASH_BONUS * 100)}% Explosionsradius (Türme in Aura)` },
+  chain: { name: 'Kettenverstärker', icon: '⚡', sub: `+${BOOSTER_SPEC_CHAIN_BONUS} Tesla-Kettensprung (Tesla-Türme in Aura)` },
+};
 
 // Tesla-Kettenblitz: Sprunganzahl nach Turm-Tier gestaffelt (siehe TOWER_TYPES.tesla-Kommentar
 // oben). Gedeckelt bei Tier 6 von 10 (nicht weiter bei Vollausbau gestiegen) - 5 gleichzeitig
@@ -104,7 +138,11 @@ const UNIT_TYPES = {
   // wieder verworfen) - stattdessen hoher Basis-Preis (cost: 300, ggü. z.B. Titan 100) als alleinige
   // Bremse, warum die Einheit nicht von Beginn an im großen Stil gespammt werden kann. Der normale
   // Sende-Kosten-Wachstum pro Tier (unitSendCost(), unten) gilt unverändert weiter obendrauf.
-  stealther: { name: 'Stealther', cost: 300, hp: 50, speed: 90, color: '#7c3aed', radius: 18, stealth: true },
+  // `incomeBoostRate: 0` (Nachtrag, auf Nutzeranfrage "da er eine Technik-Unit ist soll er kein Gold
+  // Gain geben, also +0/s"): ohne diesen Wert würde hostSendUnit() auf DEFAULT_INCOME_BOOST_RATE
+  // (10%) zurückfallen, wie bei sprinter/guard/brecher/titan - Stealther soll aber bewusst gar keinen
+  // Bonus-Einkommen-Ertrag geben (anders als z.B. Flattermann mit reduzierten 5%, siehe icecube oben).
+  stealther: { name: 'Stealther', cost: 300, hp: 50, speed: 90, color: '#7c3aed', radius: 18, stealth: true, incomeBoostRate: 0 },
 };
 const GUARD_APEX_HEAL_PCT_PER_SEC = 0.08;
 // Stealther-Apex-Fähigkeit "Manipulation" (siehe UNIT_TYPES-Kommentar oben): Radius in Pixeln (auf
@@ -135,7 +173,12 @@ const STEALTHER_MANIP_RADIUS = 160;
 // identisch zu vorher, nur gröbere Granularität (10 Zahlungen statt 50) - exakt dasselbe Prinzip wie
 // bei tierUpgradeCost() in balance-shared.js.
 const UNIT_MAX_TIER = 10;
-const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300 };
+// Bugfix (2026-08-05, User-Feedback "Gold wird NaN"): `stealther` fehlte hier - genau wie beim
+// p1UnitTiers/p2UnitTiers-Bugfix (siehe mpCore.js) führte der fehlende Eintrag zu
+// `UNIT_UPGRADE_COST_BASE[key] === undefined` und damit zu NaN-Upgrade-Kosten. Wert nach demselben
+// Muster wie alle anderen Einheiten gewählt (Upgrade-Basis = 3× Sende-Kosten, siehe sprinter 10→30,
+// guard 25→75, brecher 60→180, icecube 45→135, titan 100→300).
+const UNIT_UPGRADE_COST_BASE = { sprinter: 30, guard: 75, brecher: 180, icecube: 135, titan: 300, stealther: 900 };
 const UNIT_HP_GROWTH_PER_OLD_TIER = 1.0617;
 const UNIT_HP_GROWTH_PER_TIER = Math.pow(UNIT_HP_GROWTH_PER_OLD_TIER, 5);
 const UNIT_HP_CAP_MULT = 20;

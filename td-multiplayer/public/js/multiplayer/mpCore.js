@@ -128,8 +128,14 @@ function freshState() {
     p1Gold: 100, p1Lives: 20, p2Gold: 100, p2Lives: 20,
     p1MaxLives: 20, p2MaxLives: 20,
     p1BonusIncome: 0, p2BonusIncome: 0, // wächst, wenn man Einheiten schickt
-    p1UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0 },
-    p2UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0 },
+    // Bugfix (2026-08-05, User-Feedback "Gold wird NaN"): `stealther` fehlte hier in der fest
+    // aufgezählten Start-Tier-Liste (Nachtrag vergessen, als die Einheit hinzugefügt wurde) -
+    // tiers['stealther'] war dadurch `undefined`, unitHpMult(undefined) lieferte NaN
+    // (Math.pow(x, undefined) === NaN), was sich über unitSendCost()/unitEffectiveHp() sofort in
+    // Sende-Kosten, HP UND (via sendIncomeBoost()) den Gold-Bestand/-Gain fortpflanzte. Alle
+    // UNIT_TYPES-Keys müssen hier vertreten sein, sonst bricht genau dieser Effekt erneut auf.
+    p1UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0, stealther: 0 },
+    p2UnitTiers: { sprinter: 0, guard: 0, brecher: 0, icecube: 0, titan: 0, stealther: 0 },
     p1SendTimes: [], p2SendTimes: [], // Zeitstempel für das Sende-Limit
     p1Structures: [], p2Structures: [],
     unitsOnLaneP1: [], unitsOnLaneP2: [],
@@ -519,9 +525,29 @@ function updateInfoPanel() {
     document.getElementById('prioHpBtn').classList.toggle('active', t.priority === 'hp');
   }
   const row1 = document.getElementById('tiRow1'), row2 = document.getElementById('tiRow2'), row3 = document.getElementById('tiRow3');
+  row3.style.cursor = ''; row3.onclick = null; // Nachtrag unten: nur beim Booster-Spezialisierungs-Hinweis wieder gesetzt
   if (isMine) {
     row1.innerHTML = `<span>Einkommen</span><span>+${mineIncome(t)} Gold/s</span>`;
     row2.innerHTML = ''; row3.innerHTML = '';
+  } else if (t.type === 'booster') {
+    // Nachtrag (2026-08-05, Bugfix + Spezialisierung): Booster hat kein eigenes Schaden/Feuerrate -
+    // zeigt stattdessen, WELCHEN Boost er an Türme in seiner Aura weitergibt (siehe
+    // mpBoosterEffectsFor() - dieselben Formeln hier direkt für die Anzeige nachgerechnet) und den
+    // gewählten Spezialisierungs-Status. Row3 ist klickbar und öffnet das Wheel erneut, falls der
+    // automatische Prompt (checkBoosterSpecPrompts()) mal verpasst/abgebrochen wurde.
+    const dmgBuff = Math.min(MP_BOOSTER_DAMAGE_BUFF_BASE + MP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * t.tier, MP_BOOSTER_DAMAGE_BUFF_CAP);
+    const frBuff = Math.min(MP_BOOSTER_FIRERATE_BUFF_BASE + MP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * t.tier, MP_BOOSTER_FIRERATE_BUFF_CAP);
+    row1.innerHTML = `<span>Wirkung</span><span>+${Math.round(dmgBuff * 100)}% Schaden, +${Math.round(frBuff * 100)}% Feuerrate</span>`;
+    row2.innerHTML = `<span>Aura-Reichweite</span><span>${Math.round(effectiveRange(t))}px</span>`;
+    if (t.spec) {
+      row3.innerHTML = `<span>Spezialisierung</span><span>${BOOSTER_SPECIALIZATIONS[t.spec].icon} ${BOOSTER_SPECIALIZATIONS[t.spec].name}</span>`;
+    } else if (t.tier >= BOOSTER_SPEC_TIER) {
+      row3.innerHTML = `<span>Spezialisierung</span><span style="text-decoration:underline;">wählen ➜</span>`;
+      row3.style.cursor = 'pointer';
+      row3.onclick = () => openBoosterSpecWheel(t);
+    } else {
+      row3.innerHTML = `<span>Spezialisierung</span><span>ab Tier ${BOOSTER_SPEC_TIER}</span>`;
+    }
   } else {
     row1.innerHTML = `<span>Schaden</span><span>${effectiveDamage(t).toFixed(1)}</span>`;
     row2.innerHTML = `<span>Feuerrate</span><span>${(1000 / effectiveFireRate(t)).toFixed(2)}/s</span>`;
@@ -549,6 +575,9 @@ function newStructure(key, c, r) {
       baseSplash: type.splash || 0, projSpeed: type.projSpeed,
       slow: type.slow, slowDuration: type.slowDuration, priority: 'first',
       groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
+      // `spec` (Nachtrag 2026-08-05, Booster-Spezialisierung): nur beim Booster tatsächlich genutzt
+      // (siehe hostSpecialize()/checkBoosterSpecPrompts()), bei anderen Türmen bleibt es harmlos null.
+      spec: null,
     });
   }
   return s;
@@ -602,6 +631,18 @@ function hostSetPriority(c, r, priority, forGuest) {
   const structs = forGuest ? state.p2Structures : state.p1Structures;
   const s = structs.find(x => x.c === c && x.r === r);
   if (s && s.type !== 'mine') s.priority = priority;
+}
+// Booster-Spezialisierung wählen (Nachtrag 2026-08-05, siehe checkBoosterSpecPrompts() für den
+// Client-seitigen Auslöser und BOOSTER_SPECIALIZATIONS in balance-multiplayer.js für die Optionen).
+// Einmalig und permanent: ignoriert stille, falls der Turm kein Booster ist, noch nicht Tier
+// BOOSTER_SPEC_TIER erreicht hat, bereits eine Spezialisierung hat, oder `spec` kein gültiger
+// Schlüssel ist (z.B. bei manipulierten/veralteten Client-Nachrichten).
+function hostSpecialize(c, r, spec, forGuest) {
+  const structs = forGuest ? state.p2Structures : state.p1Structures;
+  const s = structs.find(x => x.c === c && x.r === r);
+  if (!s || s.type !== 'booster' || s.tier < BOOSTER_SPEC_TIER || s.spec) return;
+  if (!BOOSTER_SPECIALIZATIONS[spec]) return;
+  s.spec = spec;
 }
 function hostSetReady(ready, forGuest) {
   if (state.phase !== 'ready') return;
@@ -664,13 +705,39 @@ function hostSendUnit(key, forGuest) {
   }
 }
 
+// Booster-Effekt für einen Kampfturm `t` (Nachtrag 2026-08-05, siehe MP_BOOSTER_*/BOOSTER_SPEC_*
+// in balance-multiplayer.js): summiert Schaden-/Feuerraten-Boost sowie ggf. Spezialisierungs-
+// Boni ALLER Booster-Türme in Reichweite - mehrere Booster stapeln sich additiv, analog zu SPs
+// boosterBuffFor() (spCore.js). Boostet nie andere Auren (auch nicht sich selbst), nur Kampftürme.
+function mpBoosterEffectsFor(structures, t) {
+  const eff = { dmg: 0, fireRate: 0, rangeBonus: 0, splashBonus: 0, chainBonus: 0, vision: false };
+  if (TOWER_TYPES[t.type].aura) return eff;
+  structures.forEach(b => {
+    if (b.type !== 'booster' || b === t) return;
+    if (Math.hypot(b.x - t.x, b.y - t.y) > effectiveRange(b)) return;
+    eff.dmg += Math.min(MP_BOOSTER_DAMAGE_BUFF_BASE + MP_BOOSTER_DAMAGE_BUFF_GROWTH_PER_TIER * b.tier, MP_BOOSTER_DAMAGE_BUFF_CAP);
+    eff.fireRate += Math.min(MP_BOOSTER_FIRERATE_BUFF_BASE + MP_BOOSTER_FIRERATE_BUFF_GROWTH_PER_TIER * b.tier, MP_BOOSTER_FIRERATE_BUFF_CAP);
+    if (b.spec === 'range') eff.rangeBonus += BOOSTER_SPEC_RANGE_BONUS;
+    if (b.spec === 'splash') eff.splashBonus += BOOSTER_SPEC_SPLASH_BONUS;
+    if (b.spec === 'chain') eff.chainBonus += BOOSTER_SPEC_CHAIN_BONUS;
+    if (b.spec === 'vision') eff.vision = true;
+  });
+  return eff;
+}
 // ── Host: Simulationsschritt (läuft nur beim Host) ──────────────────────
 function fireTowers(structures, units, projectiles, rangeMult) {
   structures.forEach(t => {
-    if (t.type === 'mine') return;
+    // Reine Auren (Booster/Frost, siehe TOWER_TYPES) feuern nicht selbst - sie hatten vorher (ohne
+    // diesen expliziten Ausschluss) kein `damage`/`fireRate`, wodurch effectiveDamage()/
+    // effectiveFireRate() NaN lieferten und die Ziel-Suche durch NaN-Vergleiche implizit immer leer
+    // blieb (kein Crash, aber unnötige Arbeit + unklar, siehe Bugfix-Nachtrag in
+    // balance-multiplayer.js). Jetzt explizit übersprungen, gleiches Verhalten wie vorher (Aura-
+    // Türme feuern nie), nur sauberer.
+    if (t.type === 'mine' || TOWER_TYPES[t.type].aura) return;
     t.cooldown -= dtGlobal;
     if (t.cooldown > 0) return;
-    const effRange = effectiveRange(t) * (rangeMult || 1);
+    const boost = mpBoosterEffectsFor(structures, t);
+    const effRange = effectiveRange(t) * (rangeMult || 1) * (1 + boost.rangeBonus);
     let target = null, bestScore = -1;
     units.forEach(u => {
       if (t.groundOnly && u.flying) return; // Boden-Verteidigung kann Fliegende nicht anvisieren
@@ -679,23 +746,26 @@ function fireTowers(structures, units, projectiles, rangeMult) {
       // UNIT_TYPES-Kommentar in balance-multiplayer.js.
       if (u.key === 'icecube' && u.tier >= UNIT_MAX_TIER && t.type !== 'tesla') return;
       // Stealther (Nachtrag 2026-08-05, siehe UNIT_TYPES.stealther): unsichtbare Einheiten können von
-      // KEINEM Turm anvisiert werden, unabhängig von Reichweite/Typ - es gibt aktuell keinen Vision-Turm,
-      // der das aufheben würde (geplant, noch nicht gebaut).
-      if (u.stealth) return;
+      // KEINEM Turm anvisiert werden - AUSSER `t` steht in der Aura eines Boosters mit der
+      // Spezialisierung 'vision' (siehe mpBoosterEffectsFor() oben, BOOSTER_SPECIALIZATIONS.vision
+      // in balance-multiplayer.js). Ohne einen solchen Booster in der Nähe bleibt Stealther weiterhin
+      // für jeden Turm komplett unsichtbar.
+      if (u.stealth && !boost.vision) return;
       const d = Math.hypot(u.x - t.x, u.y - t.y);
       if (d > effRange) return;
       const score = t.priority === 'hp' ? u.hp : u.x;
       if (score > bestScore) { bestScore = score; target = u; }
     });
     if (target) {
-      t.cooldown = effectiveFireRate(t);
+      t.cooldown = effectiveFireRate(t) / (1 + boost.fireRate);
       projectiles.push({
-        id: nextEntityId++, x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t),
-        color: t.color, splash: effectiveSplash(t), slow: t.slow, slowDuration: t.slowDuration,
+        id: nextEntityId++, x: t.x, y: t.y, target, speed: t.projSpeed, damage: effectiveDamage(t) * (1 + boost.dmg),
+        color: t.color, splash: effectiveSplash(t) * (1 + boost.splashBonus), slow: t.slow, slowDuration: t.slowDuration,
         groundOnly: !!t.groundOnly,
         // Tesla-Kettenblitz: Anzahl der Sprünge nach Tower-Tier (siehe teslaChainJumps() in
-        // balance-multiplayer.js), Auswertung beim Einschlag in moveProjectiles() unten.
-        chainJumps: t.type === 'tesla' ? teslaChainJumps(t.tier) : 0,
+        // balance-multiplayer.js) PLUS ggf. Booster-'chain'-Spezialisierung (boost.chainBonus, siehe
+        // mpBoosterEffectsFor() oben), Auswertung beim Einschlag in moveProjectiles() unten.
+        chainJumps: t.type === 'tesla' ? teslaChainJumps(t.tier) + boost.chainBonus : 0,
       });
     }
   });
@@ -957,6 +1027,7 @@ function applyHostAction(a) {
   else if (a.type === 'sellAll') hostSellAll(true);
   else if (a.type === 'upgradeAllOfType') hostUpgradeAllOfType(a.buildType, true);
   else if (a.type === 'priority') hostSetPriority(a.c, a.r, a.priority, true);
+  else if (a.type === 'specialize') hostSpecialize(a.c, a.r, a.spec, true);
   else if (a.type === 'send') hostSendUnit(a.unitType, true);
   else if (a.type === 'upgradeUnit') hostUpgradeUnit(a.unitType, true);
   else if (a.type === 'ready') hostSetReady(a.ready, true);
@@ -1289,8 +1360,47 @@ function triggerFlash(id) {
   void el.offsetWidth; // Reflow erzwingen, damit die Animation bei schnellen Wiederholungen neu startet
   el.classList.add('active');
 }
+// Booster-Spezialisierungs-Wheel (Nachtrag 2026-08-05, User-Idee): öffnet sich automatisch, sobald
+// einer der EIGENEN Booster-Türme BOOSTER_SPEC_TIER erreicht und noch keine Spezialisierung hat.
+// `boosterSpecPromptShown` ist rein CLIENT-lokal (kein state-Feld, nicht synchronisiert) - verhindert
+// nur, dass wir denselben Turm in jedem der 60 Frames/Sekunde erneut anbieten, solange der Nutzer die
+// Wahl noch nicht getroffen hat. Bricht der Nutzer das Wheel ab (Klick daneben, `key` === null), wird
+// der Eintrag wieder entfernt, damit die nächste Prüfung erneut fragt statt den Turm für immer ohne
+// Spezialisierung zu belassen.
+const boosterSpecPromptShown = new Set();
+function checkBoosterSpecPrompts() {
+  if (!state || state.phase !== 'playing') return;
+  const myStructures = isHost ? state.p1Structures : state.p2Structures;
+  myStructures.forEach(s => {
+    if (s.type !== 'booster' || s.tier < BOOSTER_SPEC_TIER || s.spec) return;
+    const key = s.c + ',' + s.r;
+    if (boosterSpecPromptShown.has(key)) return;
+    boosterSpecPromptShown.add(key);
+    openBoosterSpecWheel(s);
+  });
+}
+// Öffnet dasselbe Wheel wie der Turmbau (js/shared/buildWheel.js), aber mit den 4 Spezialisierungen
+// aus BOOSTER_SPECIALIZATIONS (balance-multiplayer.js) statt Turmtypen - die Komponente ist bewusst
+// generisch gehalten (siehe deren Kommentar), genau für Wiederverwendungsfälle wie diesen.
+// `cost: 0` (kostenlos, keine Gold-Anzeige relevant) und `affordable: true` (kein Gold-Check nötig).
+function openBoosterSpecWheel(s) {
+  const canvas = document.getElementById('myCanvas');
+  const rect = canvas.getBoundingClientRect();
+  const clientX = rect.left + s.x * (rect.width / canvas.width);
+  const clientY = rect.top + s.y * (rect.height / canvas.height);
+  const options = Object.keys(BOOSTER_SPECIALIZATIONS).map(key => {
+    const d = BOOSTER_SPECIALIZATIONS[key];
+    return { key, name: d.name, color: '#fbbf24', icon: d.icon, cost: 0, sub: d.sub, locked: false, affordable: true };
+  });
+  openBuildWheel(clientX, clientY, options).then(spec => {
+    if (!spec) { boosterSpecPromptShown.delete(s.c + ',' + s.r); return; }
+    if (isHost) { hostSpecialize(s.c, s.r, spec); }
+    else { queueAction({ type: 'specialize', c: s.c, r: s.r, spec }); s.spec = spec; }
+  });
+}
 function updateUIFromState() {
   if (!state) return;
+  checkBoosterSpecPrompts();
 
   // Phasenwechsel behandeln
   if (state.phase === 'ready' && lastPhase !== 'ready') { myReadyLocal = false; lastMyLives = null; lastOppLives = null; }
