@@ -260,7 +260,13 @@ function buildPalette() {
     row.className = 'build-row';
     const btn = document.createElement('button');
     btn.className = 'pick-btn'; btn.id = 'build-' + key;
-    const sub = key === 'mine' ? '+6 Gold/s' : (key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette` : `${t.damage} Dmg`);
+    // Nachtrag (2026-08-05, im Zuge des Frost-Aura-Fixes entdeckt): Booster/Frost haben kein
+    // `damage`-Feld (reine Auren, siehe fireTowers()-Ausschluss) - ohne diesen Sonderfall zeigte der
+    // Bau-Button/das Bau-Wheel hier fälschlich "undefined Dmg".
+    const sub = key === 'mine' ? '+6 Gold/s'
+      : key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette`
+      : t.aura ? (t.auraTarget === 'towers' ? 'Verstärkt Türme (Aura)' : 'Verlangsamt Gegner (Aura)')
+      : `${t.damage} Dmg`;
     const countLabel = key === 'mine' ? ` <span id="mine-count-label"></span>` : '';
     const targetIcons = key === 'mine' ? '' : ` ${towerTargetIconsHtml(t)}`; // Minen feuern nie, keine Ziel-Icons nötig
     btn.innerHTML = `<div class="swatch" style="background:${t.color}"></div>
@@ -378,7 +384,13 @@ document.getElementById('myCanvas').addEventListener('click', (e) => {
   const myGold = isHost ? state.p1Gold : state.p2Gold;
   const towers = BUILD_ORDER.map(key => {
     const t = TOWER_TYPES[key];
-    const sub = key === 'mine' ? '+6 Gold/s' : (key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette` : `${t.damage} Dmg`);
+    // Nachtrag (2026-08-05, im Zuge des Frost-Aura-Fixes entdeckt): Booster/Frost haben kein
+    // `damage`-Feld (reine Auren, siehe fireTowers()-Ausschluss) - ohne diesen Sonderfall zeigte der
+    // Bau-Button/das Bau-Wheel hier fälschlich "undefined Dmg".
+    const sub = key === 'mine' ? '+6 Gold/s'
+      : key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette`
+      : t.aura ? (t.auraTarget === 'towers' ? 'Verstärkt Türme (Aura)' : 'Verlangsamt Gegner (Aura)')
+      : `${t.damage} Dmg`;
     return { key, name: t.name, color: t.color, icon: MP_TOWER_WHEEL_ICON[key] || '🔘', iconHtml: MP_TOWER_WHEEL_ICON_HTML[key], cost: t.cost, sub, locked: false, affordable: myGold >= t.cost };
   });
   openBuildWheel(e.clientX, e.clientY, towers).then(key => {
@@ -798,6 +810,27 @@ function applyStealtherManipulation(structures, units) {
     // (kein "verschwendetes" Intervall, falls der Stealther gerade an keinem Turm vorbeikommt).
   });
 }
+// Frost-Turm-Aura (Nachtrag 2026-08-05, User-Report "Frost-Aura funktioniert nicht" - siehe
+// FROST_SLOW_REFRESH_MS-Kommentar in balance-multiplayer.js für die Vorgeschichte): läuft komplett
+// unabhängig von fireTowers()/moveProjectiles() (Frost wird dort explizit als reine Aura
+// übersprungen, wie Booster). Jeden Tick wird `slowUntil` jeder Bodeneinheit im Aura-Radius knapp
+// über die aktuelle Zeit hinaus gesetzt (FROST_SLOW_REFRESH_MS statt einer festen slowDuration) -
+// der eigentliche Geschwindigkeits-Abzug (`speed *= 0.5`) passiert unverändert in moveUnits() über
+// denselben `now < u.slowUntil`-Check, den auch die (bei anderen Türmen theoretisch weiter
+// unterstützte) Projektil-Slow-Variante nutzt. Fliegende Einheiten sind wie beim alten Konzept immun
+// (analog zum Slow-Check in moveUnits()).
+function applyFrostAura(structures, units) {
+  const now = performance.now();
+  structures.forEach(t => {
+    if (t.type !== 'frost') return;
+    const range = effectiveRange(t);
+    units.forEach(u => {
+      if (u.flying) return;
+      const d = Math.hypot(u.x - t.x, u.y - t.y);
+      if (d <= range) u.slowUntil = now + FROST_SLOW_REFRESH_MS;
+    });
+  });
+}
 function moveUnits(units, onReachEnd) {
   const now = performance.now();
   for (let i = units.length - 1; i >= 0; i--) {
@@ -994,6 +1027,8 @@ function hostUpdate(dt) {
   fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2, rangeMultFor(state.p2Tech));
   applyStealtherManipulation(state.p1Structures, state.unitsOnLaneP1);
   applyStealtherManipulation(state.p2Structures, state.unitsOnLaneP2);
+  applyFrostAura(state.p1Structures, state.unitsOnLaneP1);
+  applyFrostAura(state.p2Structures, state.unitsOnLaneP2);
   // Kill-Bounty: wer die Einheit tötet, bekommt das Gold (floor(gespeicherter Sende-Preis / 3),
   // wie vorher beim automatischen Sende-Bonus) - Bosse geben stattdessen weiterhin einen Tech-Punkt.
   moveProjectiles(state.projP1, state.unitsOnLaneP1, (u) => {

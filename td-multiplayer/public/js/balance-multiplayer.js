@@ -46,6 +46,15 @@ const TOWER_TYPES = {
   mine:   { name: 'Mine',      cost: 100, color: '#ffd166' },
 };
 const BUILD_ORDER = ['arrow', 'cannon', 'frost', 'tesla', 'booster', 'mine'];
+// Nachtrag (2026-08-05, User-Report "Frost-Aura funktioniert nicht" - siehe applyFrostAura() in
+// mpCore.js): Frost hatte nie `damage`/`fireRate`/`projSpeed`, konnte als vermeintlicher
+// Projektil-Turm also nie tatsächlich treffen (NaN-Geschwindigkeit statt echter Bewegung). Der
+// Tooltip-Text (towerTargetIconsHtml() in balance-shared.js) beschrieb Frost aber schon vorher
+// korrekt als "kontinuierlich, kein Projektil" - das ist jetzt auch tatsächlich die Implementierung.
+// `TOWER_TYPES.frost.slow`/`slowDuration` werden dafür nicht mehr genutzt (waren fürs alte, nie
+// funktionierende Projektil-Konzept) - `applyFrostAura()` setzt stattdessen `slowUntil` jeden Tick
+// neu, solange eine Einheit im Aura-Radius steht, mit folgendem Refresh-Puffer gegen Frame-Lücken:
+const FROST_SLOW_REFRESH_MS = 300;
 
 // Bugfix + neues Feature (2026-08-05, User-Feedback "Booster zeigt ab Level 3 kein Wheel für
 // Upgrades"): beim Nachforschen zeigte sich, dass der Booster-Turm in Multiplayer bis hierhin
