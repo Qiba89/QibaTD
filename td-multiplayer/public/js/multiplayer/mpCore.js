@@ -12,7 +12,7 @@ import {
 } from './mpEconomy.js';
 import {
   mpDrawSprExact, MP_TOWER_SPRITE_PREFIX, mpTowerSpriteStage,
-  MP_UNIT_VISUAL_KIND, MP_SPR, mpDrawSpr, mpDrawWalkAnim, mpWalkAnimFrame, mpUpdateWalkAnim
+  MP_UNIT_VISUAL_KIND, MP_UNIT_LEVELLESS_VISUAL_KIND, MP_SPR, mpDrawSpr, mpDrawWalkAnim, mpWalkAnimFrame, mpUpdateWalkAnim
 } from './mpAssets.js';
 import { initTabsPanel } from '../shared/tabsPanel.js';
 import { openBuildWheel } from '../shared/buildWheel.js';
@@ -222,12 +222,27 @@ const APEX_INFO = {
   guard: `heilt sich um ${Math.round(GUARD_APEX_HEAL_PCT_PER_SEC * 100)}% Max-HP/s`,
   brecher: 'zusätzlich immun ggü. Slow',
   icecube: 'nur vom Tesla-Turm anvisierbar',
+  stealther: `Manipulation: alle ${STEALTHER_MANIP_INTERVAL_MS / 1000}s wird der nächste Turm in der Nähe für ${STEALTHER_MANIP_DISABLE_MS / 1000}s ausgeschaltet`,
 };
 
 // Icons fürs Bau-Wheel (die Bauen-Panel-Liste nutzt stattdessen einen Farb-Swatch,
 // im runden Wheel ist ein Symbol pro Turmtyp aber besser erkennbar).
 const MP_TOWER_WHEEL_ICON = {
-  arrow: '🏹', cannon: '💣', frost: '❄️', tesla: '⚡', booster: '🔧', mine: '⛏️',
+  arrow: '🏹', frost: '❄️', booster: '⚙️', mine: '⛏️',
+};
+// Nachtrag (auf Nutzeranfrage): Kanone zeigt statt eines Emojis das echte Turm-Sprite
+// (sieht dadurch aus wie eine tatsächliche Kanone statt einer Bombe). Tesla bekommt ein
+// kleines Inline-SVG ("mini Tesla-Turm": Spule + Blitz), da es dafür kein echtes Sprite
+// gibt (Tesla rendert im Spiel selbst nur als Farbkreis, siehe MP_TOWER_SPRITE_PREFIX).
+const MP_TOWER_WHEEL_ICON_HTML = {
+  cannon: '<img src="assets/tower_cannon_L1.png" style="width:100%;height:100%;object-fit:contain;image-rendering:pixelated;">',
+  tesla: `<svg viewBox="0 0 24 24" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="14" width="4" height="7" fill="#22d3ee"/>
+    <ellipse cx="12" cy="14" rx="6" ry="2" fill="none" stroke="#22d3ee" stroke-width="1.5"/>
+    <ellipse cx="12" cy="10" rx="4" ry="1.5" fill="none" stroke="#22d3ee" stroke-width="1.5"/>
+    <circle cx="12" cy="6" r="2" fill="#22d3ee"/>
+    <path d="M12 8 L10 12 L14 12 L11 17" stroke="#fff" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`,
 };
 
 // ── Bau-Palette & Sende-Palette (UI) ─────────────────────────────────────
@@ -358,7 +373,7 @@ document.getElementById('myCanvas').addEventListener('click', (e) => {
   const towers = BUILD_ORDER.map(key => {
     const t = TOWER_TYPES[key];
     const sub = key === 'mine' ? '+6 Gold/s' : (key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette` : `${t.damage} Dmg`);
-    return { key, name: t.name, color: t.color, icon: MP_TOWER_WHEEL_ICON[key] || '⚙️', cost: t.cost, sub, locked: false, affordable: myGold >= t.cost };
+    return { key, name: t.name, color: t.color, icon: MP_TOWER_WHEEL_ICON[key] || '🔘', iconHtml: MP_TOWER_WHEEL_ICON_HTML[key], cost: t.cost, sub, locked: false, affordable: myGold >= t.cost };
   });
   openBuildWheel(e.clientX, e.clientY, towers).then(key => {
     if (key) tryBuildAt(key, c, r);
@@ -626,7 +641,13 @@ function hostSendUnit(key, forGuest) {
   // `key` (Einheiten-Typ, z.B. 'brecher'/'sprinter'/'guard'/'icecube') wird ab jetzt mitgespeichert -
   // die Tier-50-Apex-Fähigkeiten (siehe UNIT_TYPES-Kommentar in balance-multiplayer.js) müssen zur
   // Laufzeit wissen, welchen Typ eine Einheit hat, nicht nur ihre Basiswerte.
-  const unitObj = { id: nextEntityId++, key, hp, maxHp: hp, speed, radius: u.radius, color: u.color, flying: !!u.flying, tier, cost, x: 0, y: PATH_Y, slowUntil: 0 };
+  // `stealth` (Nachtrag 2026-08-05, neue Einheit Stealther): macht die Einheit für ALLE gegnerischen
+  // Türme unsichtbar/unanvisierbar (siehe fireTowers()) und wird auf der Verteidiger-Seite gar nicht
+  // erst gezeichnet (siehe drawLane()/draw()) - aktuell dauerhaft, da es noch keinen Vision-Turm gibt,
+  // der das aufheben könnte. `manipCooldown` startet auf 0, damit die Tier-10-Apex-Fähigkeit
+  // "Manipulation" (siehe applyStealtherManipulation()) sofort beim ersten Tick auslösen kann, sobald
+  // die Einheit Tier UNIT_MAX_TIER erreicht hat.
+  const unitObj = { id: nextEntityId++, key, hp, maxHp: hp, speed, radius: u.radius, color: u.color, flying: !!u.flying, stealth: !!u.stealth, tier, cost, x: 0, y: PATH_Y, slowUntil: 0, manipCooldown: 0 };
   sendTimes.push(Date.now());
   // Kein sofortiges Gold mehr für den Gegner beim Senden (war vorher Math.floor(cost/3), unabhängig
   // davon ob die Einheit je etwas bewirkt) - stattdessen bekommt jetzt der die Belohnung, der die
@@ -654,9 +675,13 @@ function fireTowers(structures, units, projectiles, rangeMult) {
     units.forEach(u => {
       if (t.groundOnly && u.flying) return; // Boden-Verteidigung kann Fliegende nicht anvisieren
       if (t.airOnly && !u.flying) return; // Tesla feuert nur auf Fliegende (Gegenstück zu groundOnly)
-      // Apex-Fähigkeit Ice Cube bei Vollausbau (UNIT_MAX_TIER): nur noch vom Tesla-Turm anvisierbar, siehe
+      // Apex-Fähigkeit Flattermann (intern "icecube") bei Vollausbau (UNIT_MAX_TIER): nur noch vom Tesla-Turm anvisierbar, siehe
       // UNIT_TYPES-Kommentar in balance-multiplayer.js.
       if (u.key === 'icecube' && u.tier >= UNIT_MAX_TIER && t.type !== 'tesla') return;
+      // Stealther (Nachtrag 2026-08-05, siehe UNIT_TYPES.stealther): unsichtbare Einheiten können von
+      // KEINEM Turm anvisiert werden, unabhängig von Reichweite/Typ - es gibt aktuell keinen Vision-Turm,
+      // der das aufheben würde (geplant, noch nicht gebaut).
+      if (u.stealth) return;
       const d = Math.hypot(u.x - t.x, u.y - t.y);
       if (d > effRange) return;
       const score = t.priority === 'hp' ? u.hp : u.x;
@@ -673,6 +698,34 @@ function fireTowers(structures, units, projectiles, rangeMult) {
         chainJumps: t.type === 'tesla' ? teslaChainJumps(t.tier) : 0,
       });
     }
+  });
+}
+// Stealther-Apex-Fähigkeit "Manipulation" (Nachtrag 2026-08-05, siehe UNIT_TYPES.stealther-Kommentar
+// in balance-multiplayer.js): bei Vollausbau (UNIT_MAX_TIER) schaltet ein Stealther alle
+// STEALTHER_MANIP_INTERVAL_MS (3s) den nächstgelegenen gegnerischen Turm im Radius
+// STEALTHER_MANIP_RADIUS für STEALTHER_MANIP_DISABLE_MS (2s) aus - umgesetzt, indem der Turm-Cooldown
+// hochgesetzt wird (derselbe dt-basierte Cooldown-Mechanismus wie beim normalen Feuern, siehe
+// fireTowers() oben, statt eines separaten absoluten Zeitstempels). Läuft unabhängig davon, ob der
+// Stealther selbst gerade anvisierbar wäre (ist er wegen `stealth` ohnehin nie, siehe fireTowers()) -
+// bewusst symmetrisch zu den anderen Apex-Fähigkeiten, die auch am jeweils betroffenen Mechanismus
+// direkt ansetzen statt über die normale Ziel-Auswahl zu laufen.
+function applyStealtherManipulation(structures, units) {
+  units.forEach(u => {
+    if (u.key !== 'stealther' || u.tier < UNIT_MAX_TIER) return;
+    u.manipCooldown -= dtGlobal;
+    if (u.manipCooldown > 0) return;
+    let nearest = null, bestDist = STEALTHER_MANIP_RADIUS;
+    structures.forEach(t => {
+      if (t.type === 'mine') return;
+      const d = Math.hypot(u.x - t.x, u.y - t.y);
+      if (d <= bestDist) { bestDist = d; nearest = t; }
+    });
+    if (nearest) {
+      nearest.cooldown = Math.max(nearest.cooldown, STEALTHER_MANIP_DISABLE_MS);
+      u.manipCooldown = STEALTHER_MANIP_INTERVAL_MS;
+    }
+    // Kein Turm in Reichweite: manipCooldown bleibt bei <=0, nächster Tick versucht es sofort wieder
+    // (kein "verschwendetes" Intervall, falls der Stealther gerade an keinem Turm vorbeikommt).
   });
 }
 function moveUnits(units, onReachEnd) {
@@ -869,6 +922,8 @@ function hostUpdate(dt) {
   });
   fireTowers(state.p1Structures, state.unitsOnLaneP1, state.projP1, rangeMultFor(state.p1Tech));
   fireTowers(state.p2Structures, state.unitsOnLaneP2, state.projP2, rangeMultFor(state.p2Tech));
+  applyStealtherManipulation(state.p1Structures, state.unitsOnLaneP1);
+  applyStealtherManipulation(state.p2Structures, state.unitsOnLaneP2);
   // Kill-Bounty: wer die Einheit tötet, bekommt das Gold (floor(gespeicherter Sende-Preis / 3),
   // wie vorher beim automatischen Sende-Bonus) - Bosse geben stattdessen weiterhin einen Tech-Punkt.
   moveProjectiles(state.projP1, state.unitsOnLaneP1, (u) => {
@@ -1368,7 +1423,12 @@ function updateUIFromState() {
   updateInfoPanel();
 }
 
-function drawLane(ctx, structures, units, projectiles) {
+// `hideStealth` (Nachtrag 2026-08-05, neue Einheit Stealther): true, wenn dieser Aufruf die EIGENE
+// Verteidigung des lokalen Spielers zeichnet (myCtx) - dort dürfen gegnerische Stealther-Einheiten
+// nicht sichtbar sein (siehe draw() unten für die Zuordnung). false beim oppCtx-Aufruf, der die vom
+// LOKALEN Spieler SELBST gesendeten Einheiten gegen das gegnerische Board zeigt - dort soll man seine
+// eigene (unsichtbare) Einheit weiterhin sehen können, um sie zu verfolgen.
+function drawLane(ctx, structures, units, projectiles, hideStealth) {
   ctx.clearRect(0, 0, LANE_W, LANE_H);
   // Nachtrag (Steampunk-Wüsten-Redesign, auf Nutzeranfrage, 2026-08-04): das bisherige
   // Kachel-Band-System (ground_r1c2/r2c1/r2c2, siehe Git-Historie) ist ersetzt durch EIN
@@ -1414,6 +1474,11 @@ function drawLane(ctx, structures, units, projectiles) {
     }
   });
   units.forEach(u => {
+    // Stealther (Nachtrag 2026-08-05): auf der eigenen Verteidigungsansicht (hideStealth===true) wird
+    // eine unsichtbare Einheit GAR NICHT gezeichnet - kein Sprite, kein Fallback-Kreis, keine
+    // Lebensleiste. Auf der eigenen Angriffsansicht (hideStealth===false, siehe draw() unten) bleibt
+    // sie sichtbar, damit der sendende Spieler seine eigene Einheit weiter verfolgen kann.
+    if (u.stealth && hideStealth) return;
     // Nachtrag (Teil 11, "alle Einheiten ... sprites hinzugefügt werden"): echte Lauf-Animation statt
     // Kreis, über MP_UNIT_VISUAL_KIND (siehe weiter oben für die Zuordnungs-Begründung, insbesondere
     // icecube->flugeinheit und titan->boss). Sprite-Stufe = u.tier (0-10, 1:1 dieselbe Skala wie die
@@ -1441,13 +1506,13 @@ function drawLane(ctx, structures, units, projectiles) {
     // selbst bleibt unverändert (Spiellogik/Kollision/Weg-Position), nur die Darstellung wird für
     // fliegende Einheiten um eine halbe Zelle nach oben versetzt.
     const drawY = u.y - (u.flying ? CELL / 2 : 0);
-    const spriteDrawn = visKind && mpDrawWalkAnim(ctx, visKind + '_L' + visLevel + '_walk', u.x, drawY, targetW, mpWalkAnimFrame);
+    // Nachtrag (2026-08-05, neues Flattermann-Sprite): manche Visual-Kinds haben nur EIN Sprite für
+    // alle Stufen statt eines _L{n}-Satzes (siehe MP_UNIT_LEVELLESS_VISUAL_KIND) - Level-Suffix dann
+    // weglassen, sonst würde z.B. nach 'flattermann_walk_L3_walk.png' gesucht (existiert nicht).
+    const spriteKey = visKind && (MP_UNIT_LEVELLESS_VISUAL_KIND.has(visKind) ? visKind + '_walk' : visKind + '_L' + visLevel + '_walk');
+    const spriteDrawn = visKind && mpDrawWalkAnim(ctx, spriteKey, u.x, drawY, targetW, mpWalkAnimFrame);
     if (!spriteDrawn) {
       ctx.beginPath(); ctx.fillStyle = u.color; ctx.arc(u.x, drawY, u.radius, 0, Math.PI * 2); ctx.fill();
-    }
-    if (u.flying) {
-      ctx.beginPath(); ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-      ctx.arc(u.x, drawY, u.radius + 3, 0, Math.PI * 2); ctx.stroke();
     }
     if (!u.isBoss && u.tier) drawLevelStars(ctx, u.x, drawY, u.tier);
     const w = u.radius * 2;
@@ -1489,12 +1554,16 @@ function draw() {
     pr2 = interpolateList(prevState.projP2, state.projP2, t);
   }
 
+  // Stealther-Sichtbarkeit (Nachtrag 2026-08-05): myCtx zeigt die EIGENE Verteidigung (gegnerische
+  // Einheiten greifen MICH an) - dort werden feindliche Stealther versteckt (hideStealth=true).
+  // oppCtx zeigt das GEGNERISCHE Board (MEINE gesendeten Einheiten greifen dort an) - dort bleibt ein
+  // eigener Stealther sichtbar (hideStealth=false), siehe drawLane()-Kommentar.
   if (isHost) {
-    drawLane(myCtx, state.p1Structures, u1, pr1);
-    drawLane(oppCtx, state.p2Structures, u2, pr2);
+    drawLane(myCtx, state.p1Structures, u1, pr1, true);
+    drawLane(oppCtx, state.p2Structures, u2, pr2, false);
   } else {
-    drawLane(myCtx, state.p2Structures, u2, pr2);
-    drawLane(oppCtx, state.p1Structures, u1, pr1);
+    drawLane(myCtx, state.p2Structures, u2, pr2, true);
+    drawLane(oppCtx, state.p1Structures, u1, pr1, false);
   }
 }
 

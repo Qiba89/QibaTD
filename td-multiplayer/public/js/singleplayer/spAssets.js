@@ -157,11 +157,16 @@ export function drawSprCover(key, dx, dy, dw, dh) {
   ctx.drawImage(rec.img, sx, sy, sw, sh, dx, dy, dw, dh);
   return true;
 }
-// drawWalkAnim(): generische 4-Frame-Lauf-Animation für JEDE Gegner-/Boss-Sprite-Stufe (ursprünglich
+// Nachtrag (2026-08-05, auf Nutzeranfrage "können wir auf 6 erweitern"): analog zu
+// MP_SPRITE_FRAME_COUNT in mpAssets.js - boss_L5_walk.png (User-Korrektur, inkl. neuer Stampf-
+// Attacke + Feder-Verlust-Frame) hat 6 statt 4 Frames. Nicht gelistete Keys bleiben bei 4.
+export const SPRITE_FRAME_COUNT = { boss_L5_walk: 6 };
+
+// drawWalkAnim(): generische Lauf-Animation für JEDE Gegner-/Boss-Sprite-Stufe (ursprünglich
 // nur für den Affen-Boss geschrieben, jetzt für alle Gegnertypen×Stufen wiederverwendet - siehe
-// ENEMY_WALK_TYPES oben). Horizontales Spritesheet mit 4 gleich breiten Frames, `frameIdx` (0-3)
-// kommt aus dem globalen `walkAnimFrame` unten (läuft mit dem echten Frame-dt, nicht mit der ggf.
-// vervielfachten Spielgeschwindigkeit - siehe updateEffects()).
+// ENEMY_WALK_TYPES oben). Horizontales Spritesheet, Frame-Anzahl siehe SPRITE_FRAME_COUNT oben
+// (Standard 4), `frameIdx` kommt aus dem globalen `walkAnimFrame` unten (läuft mit dem echten
+// Frame-dt, nicht mit der ggf. vervielfachten Spielgeschwindigkeit - siehe updateEffects()).
 // (Nachtrag rückgängig gemacht, 2026-08-03, analog zum Multiplayer-Pendant mpDrawWalkAnim(): der
 // Boden-Anker-Versuch sah in der Praxis nicht gut aus - User-Feedback "mach die einheiten wieder
 // dahin wo sie waren". (cx,cy) ist wieder der Bildmittelpunkt; kompaktere Optik kommt jetzt über
@@ -169,9 +174,10 @@ export function drawSprCover(key, dx, dy, dw, dh) {
 export function drawWalkAnim(key, cx, cy, targetW, frameIdx) {
   const rec = SPR[key];
   if (!rec || !rec.ready) return false;
-  const fw = rec.w / 4, fh = rec.h;
+  const frameCount = SPRITE_FRAME_COUNT[key] || 4;
+  const fw = rec.w / frameCount, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, (frameIdx % frameCount) * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // Deterministische Pseudo-Zufallszahl aus (c,r) - für die feste Deko-Platzierung (Bäume/Zelte) auf

@@ -15,10 +15,15 @@
 //     ...
 //   ]);
 //   if (key) { /* bauen */ }
-// Gibt null zurück, wenn der Nutzer außerhalb geklickt oder Escape gedrückt hat.
+// Gigt null zurück, wenn der Nutzer außerhalb geklickt oder Escape gedrückt hat.
+// Statt eines Emoji (`icon`) kann pro Turm auch `iconHtml` gesetzt werden (rohes HTML,
+// z.B. ein <img> auf ein echtes Sprite oder ein kleines Inline-SVG) - `iconHtml` hat
+// Vorrang vor `icon`, falls beides gesetzt ist.
 
-const RADIUS = 78;
-const SEG_SIZE = 62;
+// Nachtrag (auf Nutzeranfrage "können wir es ca 50% größer machen?"): Basiswerte um 50%
+// erhöht (Radius 78→117, Segmentgröße 62→93, Schriftgrößen passend mitskaliert).
+const RADIUS = 117;
+const SEG_SIZE = 93;
 const MARGIN = 8; // Sicherheitsabstand zum Bildschirmrand
 
 let overlayEl = null;
@@ -84,8 +89,9 @@ export function openBuildWheel(clientX, clientY, towers) {
       box-shadow:0 2px 8px rgba(0,0,0,0.5); opacity:${locked ? 0.4 : (t.affordable === false ? 0.55 : 1)};
       filter:${locked ? 'grayscale(1)' : 'none'};
     `;
-    seg.innerHTML = `<span style="font-size:20px;">${locked ? '🔒' : t.icon}</span>` +
-      (locked ? '' : `<span style="font-size:9px;font-weight:700;">${t.cost}g</span>`);
+    const iconHtml = locked ? '🔒' : (t.iconHtml || t.icon);
+    seg.innerHTML = `<span style="font-size:30px; line-height:1; display:flex; align-items:center; justify-content:center; width:70%; height:70%;">${iconHtml}</span>` +
+      (locked ? '' : `<span style="font-size:13px;font-weight:700;">${t.cost}g</span>`);
     if (!locked) seg.addEventListener('click', (e) => { e.stopPropagation(); closeBuildWheel(t.key); });
     wheel.appendChild(seg);
   });

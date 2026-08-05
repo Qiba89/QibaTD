@@ -30,7 +30,7 @@ const TOWER_TYPES = {
   // Ziel bleibt Tesla dadurch klar schwächer als der Pfeilturm (Basis 9, gleiche Kurve, aber
   // schnellere Feuerrate 500ms statt 1100ms hier) - der eigentliche Wert kommt erst durch die Kette
   // gegen mehrere geclusterte Flieger (z.B. eine gezielte Ice-Cube-Schwarm-Taktik des Gegners) sowie
-  // dadurch, dass Tesla bei Vollausbau der EINZIGE Turm ist, der einen voll ausgebauten Ice Cube noch
+  // dadurch, dass Tesla bei Vollausbau der EINZIGE Turm ist, der einen voll ausgebauten Flattermann (intern weiterhin "icecube") noch
   // anvisieren kann (siehe UNIT_TYPES.icecube-Kommentar unten). Siehe docs/balancing.md, Abschnitt
   // "Tesla-Turm".
   tesla:  { name: 'Tesla-Turm', cost: 100, range: 90, damage: 8, fireRate: 1100, color: '#22d3ee', projSpeed: 500, airOnly: true },
@@ -81,14 +81,37 @@ const DEFAULT_INCOME_BOOST_RATE = 0.10;
 //  - brecher:  bei Vollausbau zusätzlich immun gegen Slow (war bisher nur Fliegenden vorbehalten).
 //  - icecube:  bei Vollausbau nur noch vom Tesla-Turm anvisierbar - alle anderen Türme ignorieren ihn
 //              komplett bei der Zielsuche (siehe TOWER_TYPES.tesla-Kommentar oben).
+//  - stealther: bei Vollausbau "Manipulation" - alle STEALTHER_MANIP_INTERVAL_MS (3s) wird der
+//              nächstgelegene gegnerische Turm im Radius STEALTHER_MANIP_RADIUS für
+//              STEALTHER_MANIP_DISABLE_MS (2s) deaktiviert (siehe applyStealtherManipulation() in
+//              mpCore.js). Umsetzung: `u.manipCooldown`-Feld auf dem Einheiten-Objekt.
 const UNIT_TYPES = {
   sprinter: { name: 'Sprinter', cost: 10, hp: 25,  speed: 140, color: '#4fd1c5', radius: 16 },
   guard:    { name: 'Guard',    cost: 25, hp: 70,  speed: 90,  color: '#ff9f43', radius: 20 },
   brecher:  { name: 'Brecher',  cost: 60, hp: 220, speed: 55,  color: '#c084fc', radius: 28 },
-  icecube:  { name: 'Ice Cube', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 22, flying: true, incomeBoostRate: 0.05 },
+  // Nachtrag (2026-08-05, auf Nutzeranfrage): im UI umbenannt zu "Flattermann" (neues eigenes
+  // Bewegungssprite, siehe MP_UNIT_VISUAL_KIND in mpAssets.js) - der interne Key `icecube` bleibt
+  // bewusst unverändert (wird an vielen Stellen referenziert: AI-Gewichte, Upgrade-Kosten, APEX_INFO,
+  // Tesla-Zielsuche-Kommentar oben usw.), nur der Anzeigename ändert sich.
+  icecube:  { name: 'Flattermann', cost: 45, hp: 100, speed: 90,  color: '#a5f3fc', radius: 22, flying: true, incomeBoostRate: 0.05 },
   titan:    { name: 'Titan',    cost: 100, hp: 350, speed: 45, color: '#f43f5e', radius: 32, requiresTech: { branch: 'attack', tier: 4 } },
+  // Nachtrag (2026-08-05, neue Einheit auf Nutzeranfrage): Stealther ist für Türme komplett
+  // unsichtbar/unanvisierbar (siehe `stealth: true` - ausgewertet in fireTowers()/drawLane() in
+  // mpCore.js) - es gibt aktuell KEINEN Turm mit "Vision", der das aufheben könnte (geplant, aber noch
+  // nicht gebaut). Bewusst fragil (wenig HP, sogar unter Guard) und nur mittleres Tempo, damit die
+  // ansonsten kaum konterbare Unsichtbarkeit nicht auch noch mit Tankiness kombiniert wird.
+  // Balancing (Nachtrag, Entscheidung revidiert): KEIN Tech-Gate (ursprünglich Angriff-Tier 3 geplant,
+  // wieder verworfen) - stattdessen hoher Basis-Preis (cost: 300, ggü. z.B. Titan 100) als alleinige
+  // Bremse, warum die Einheit nicht von Beginn an im großen Stil gespammt werden kann. Der normale
+  // Sende-Kosten-Wachstum pro Tier (unitSendCost(), unten) gilt unverändert weiter obendrauf.
+  stealther: { name: 'Stealther', cost: 300, hp: 50, speed: 90, color: '#7c3aed', radius: 18, stealth: true },
 };
 const GUARD_APEX_HEAL_PCT_PER_SEC = 0.08;
+// Stealther-Apex-Fähigkeit "Manipulation" (siehe UNIT_TYPES-Kommentar oben): Radius in Pixeln (auf
+// CELL=80-Basis kalibriert, ähnlich einer Pfeilturm-Reichweite) sowie Intervall/Dauer in Millisekunden.
+const STEALTHER_MANIP_INTERVAL_MS = 3000;
+const STEALTHER_MANIP_DISABLE_MS = 2000;
+const STEALTHER_MANIP_RADIUS = 160;
 
 // Einheiten-Upgrades: UNIT_MAX_TIER 50 → 10 (Nachtrag, Stern-Kompression - siehe TOWER_MAX_TIER-
 // Kommentar in balance-shared.js für die volle Begründung; auf Nutzerentscheidung "Türme + Einheiten"

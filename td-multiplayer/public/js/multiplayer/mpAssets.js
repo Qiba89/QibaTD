@@ -88,8 +88,14 @@ export function mpTowerSpriteStage(tier) { return Math.min(5, Math.floor(tier / 
 // (sprinter/guard/brecher/flugeinheit/boss, siehe ENEMY_WALK_TYPES in Teil 4) - 3 davon passen exakt
 // (gleicher Name UND gleiches Konzept: eine Figur, die pro Stufe stärker/gepanzerter aussieht), die
 // übrigen 2 brauchen eine bewusste Zuordnungs-Entscheidung:
-//  - icecube (MPs einzige fliegende Einheit) -> flugeinheit (SPs einzige fliegende Gegner-Kategorie) -
-//    konzeptionell die naheliegendste Wahl.
+//  - icecube (MPs einzige fliegende Einheit) -> NEUES eigenes Sprite "flattermann" (Nachtrag
+//    2026-08-05, auf Nutzeranfrage: eigenes Bewegungssprite, Einheit im UI in "Flattermann"
+//    umbenannt, siehe UNIT_TYPES.icecube.name in balance-multiplayer.js - der interne Key `icecube`
+//    bleibt unverändert, um keine bestehenden Referenzen aufzubrechen). Nutzte vorher `flugeinheit`
+//    (SPs fliegende Gegner-Kategorie) - dieses Sprite bleibt für SP unverändert erhalten (dort nach
+//    wie vor relevant, siehe ENEMY_WALK_TYPES), MP zeigt für icecube jetzt aber `flattermann_walk.png`.
+//    Nur EIN Sprite für alle Stufen (kein _L{n}-Satz wie bei den anderen Typen) - siehe
+//    MP_UNIT_LEVELLESS_VISUAL_KIND unten.
 //  - titan (MPs Tech-gated Elite-Einheit, NICHT zu verwechseln mit SPs Titan-TURM) -> boss. Einzige
 //    verbleibende SP-Kategorie, aber mit einer Einschränkung: SPs boss_L1..L10_walk sind (anders als
 //    die anderen 4 Typen) 10 UNTERSCHIEDLICHE Charaktere statt einer einzelnen eskalierenden Figur
@@ -97,7 +103,16 @@ export function mpTowerSpriteStage(tier) { return Math.min(5, Math.floor(tier / 
 //    Tier-Aufstieg komplett, statt (wie bei den anderen 4 Typen) sichtbar stärker zu wirken. Mangels
 //    dediziertem Titan-Bildmaterial die einzig sinnvolle Option; siehe docs/visuals.md, Teil 11,
 //    "Weiteres Vorgehen" - offen für Nutzer-Feedback.
-export const MP_UNIT_VISUAL_KIND = { sprinter: 'sprinter', guard: 'guard', brecher: 'brecher', icecube: 'flugeinheit', titan: 'boss' };
+// Nachtrag (2026-08-05, neue Einheit Stealther): eigenes Sprite `stealther`, ebenfalls nur EIN
+// Bild für alle Stufen (kein Level-Bildmaterial geliefert, wie bei flattermann - siehe
+// MP_UNIT_LEVELLESS_VISUAL_KIND unten).
+export const MP_UNIT_VISUAL_KIND = { sprinter: 'sprinter', guard: 'guard', brecher: 'brecher', icecube: 'flattermann', titan: 'boss', stealther: 'stealther' };
+// Visual-Kinds, die (anders als der Rest) NUR EIN Sprite für alle Stufen haben statt eines
+// _L1.._L10-Satzes - der Aufrufer (drawUnits() in mpCore.js) lässt bei diesen Kinds das '_L{n}' im
+// Dateinamen weg. `flattermann` (Nachtrag 2026-08-05), jetzt auch `stealther` (selbes Datum, neue Einheit).
+export const MP_UNIT_LEVELLESS_VISUAL_KIND = new Set(['flattermann', 'stealther']);
+MP_ASSET_FILES.flattermann_walk = 'flattermann_walk.png';
+MP_ASSET_FILES.stealther_walk = 'stealther_walk.png';
 for (let lvl = 1; lvl <= 10; lvl++) {
   ['sprinter', 'guard', 'brecher', 'flugeinheit', 'boss'].forEach(kind => {
     MP_ASSET_FILES[kind + '_L' + lvl + '_walk'] = kind + '_L' + lvl + '_walk.png';
@@ -124,8 +139,20 @@ export function mpDrawSpr(ctx, key, cx, cy, targetW) {
   ctx.drawImage(rec.img, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
-// mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales 4-Frame-Spritesheet, ctx als
-// expliziter Parameter (statt geschlossenem globalen ctx wie in SP) passend zum drawLane(ctx,...)-Stil.
+// Nachtrag (2026-08-05, auf Nutzeranfrage "können wir auf 6 erweitern"): die meisten Lauf-
+// Spritesheets haben 4 Frames, aber boss_L5_walk.png (User-Korrektur, inkl. neuer Stampf-
+// Attacke + Feder-Verlust-Frame) hat 6. Frame-Anzahl ist deshalb jetzt pro Sprite-Key konfigurierbar
+// statt hart auf 4 codiert - alle nicht gelisteten Keys bleiben bei 4 (keine Verhaltensänderung für
+// den Rest des Bildmaterials).
+// flattermann_walk: 3 (Nachtrag 2026-08-05, neues Flattermann/icecube-Sprite). stealther_walk: 8
+// (Nachtrag, selbes Datum, neue Einheit Stealther - Nutzer wollte alle 8 gelieferten Frames nutzen
+// statt nur 4 auszuwählen) - das globale Zähler-Modulo unten musste dafür von 12 auf 24 (kgV von
+// 4/6/3/8) erhöht werden, sonst hätte der 8-Frame-Zyklus nicht sauber durchlaufen.
+export const MP_SPRITE_FRAME_COUNT = { boss_L5_walk: 6, flattermann_walk: 3, stealther_walk: 8 };
+
+// mpDrawWalkAnim(): identisch zu SPs drawWalkAnim() - horizontales Spritesheet (Frame-Anzahl siehe
+// MP_SPRITE_FRAME_COUNT, Standard 4), ctx als expliziter Parameter (statt geschlossenem globalen ctx
+// wie in SP) passend zum drawLane(ctx,...)-Stil.
 // (Nachtrag rückgängig gemacht, 2026-08-03: Boden-Anker "auf der x-Achse aufliegend" sah in der
 // Praxis nicht gut aus - User-Feedback "mach die einheiten wieder dahin wo sie waren". (cx,cy) ist
 // wieder der Bild-MITTELPUNKT wie ursprünglich; die gewünschte kompaktere Optik kommt jetzt über eine
@@ -133,15 +160,21 @@ export function mpDrawSpr(ctx, key, cx, cy, targetW) {
 export function mpDrawWalkAnim(ctx, key, cx, cy, targetW, frameIdx) {
   const rec = MP_SPR[key];
   if (!rec || !rec.ready) return false;
-  const fw = rec.w / 4, fh = rec.h;
+  const frameCount = MP_SPRITE_FRAME_COUNT[key] || 4;
+  const fw = rec.w / frameCount, fh = rec.h;
   const h = targetW * (fh / fw);
-  ctx.drawImage(rec.img, frameIdx * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
+  ctx.drawImage(rec.img, (frameIdx % frameCount) * fw, 0, fw, fh, cx - targetW / 2, cy - h / 2, targetW, h);
   return true;
 }
 // Lauf-Animations-Takt (analog zu SPs walkAnimAccum/-Frame, Teil 4): läuft mit dem ECHTEN Frame-dt
 // aus draw() (siehe dort) - MP hat (anders als SP) kein 1x/2x/5x/10x-Spieltempo, trotzdem bewusst
 // über einen eigenen Timer statt direkt an die Render-Framerate gekoppelt, damit die Lauf-Animation
 // bei stark schwankender Framerate (z.B. Gast-Interpolation) gleichmäßig bleibt.
+// Nachtrag (2026-08-05): globaler Zähler läuft jetzt bis 24 (kgV von 4, 6, 3 und 8 - Nachtrag 2
+// selbes Datum, neuer Stealther mit 8 Frames, vorher 12 als kgV von nur 4 und 6) statt fest bis 4,
+// damit alle aktuell vorkommenden Frame-Anzahlen (siehe MP_SPRITE_FRAME_COUNT) gleichzeitig
+// ruckelfrei durchlaufen - der tatsächliche Frame-Index pro Sprite wird in mpDrawWalkAnim() oben per
+// `% frameCount` daraus abgeleitet.
 export let mpWalkAnimAccum = 0;
 export let mpWalkAnimFrame = 0;
 export let mpWalkAnimLastTs = null;
@@ -150,5 +183,5 @@ export function mpUpdateWalkAnim() {
   if (mpWalkAnimLastTs === null) { mpWalkAnimLastTs = now; return; }
   mpWalkAnimAccum += now - mpWalkAnimLastTs;
   mpWalkAnimLastTs = now;
-  while (mpWalkAnimAccum >= 150) { mpWalkAnimAccum -= 150; mpWalkAnimFrame = (mpWalkAnimFrame + 1) % 4; }
+  while (mpWalkAnimAccum >= 150) { mpWalkAnimAccum -= 150; mpWalkAnimFrame = (mpWalkAnimFrame + 1) % 24; }
 }

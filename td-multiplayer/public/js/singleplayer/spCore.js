@@ -16,7 +16,21 @@ import { openBuildWheel } from '../shared/buildWheel.js';
 // im runden Wheel ist ein Symbol pro Turmtyp aber besser erkennbar) - analog zu
 // MP_TOWER_WHEEL_ICON in mpCore.js.
 const SP_TOWER_WHEEL_ICON = {
-  arrow: '🏹', cannon: '💣', frost: '❄️', booster: '🔧', tesla: '⚡', titan: '🗿',
+  arrow: '🏹', frost: '❄️', booster: '⚙️', titan: '🗿',
+};
+// Nachtrag (auf Nutzeranfrage): Kanone zeigt statt eines Emojis das echte Turm-Sprite
+// (sieht dadurch aus wie eine tatsächliche Kanone statt einer Bombe). Tesla bekommt ein
+// kleines Inline-SVG ("mini Tesla-Turm": Spule + Blitz), da es dafür kein echtes Sprite
+// gibt - analog zu MP_TOWER_WHEEL_ICON_HTML in mpCore.js.
+const SP_TOWER_WHEEL_ICON_HTML = {
+  cannon: '<img src="assets/tower_cannon_L1.png" style="width:100%;height:100%;object-fit:contain;image-rendering:pixelated;">',
+  tesla: `<svg viewBox="0 0 24 24" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="14" width="4" height="7" fill="#22d3ee"/>
+    <ellipse cx="12" cy="14" rx="6" ry="2" fill="none" stroke="#22d3ee" stroke-width="1.5"/>
+    <ellipse cx="12" cy="10" rx="4" ry="1.5" fill="none" stroke="#22d3ee" stroke-width="1.5"/>
+    <circle cx="12" cy="6" r="2" fill="#22d3ee"/>
+    <path d="M12 8 L10 12 L14 12 L11 17" stroke="#fff" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`,
 };
 
 (function(){
@@ -290,7 +304,7 @@ canvas.addEventListener('click', (e) => {
   if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
   const towerOptions = Object.entries(SP_TOWER_TYPES).map(([key, t]) => {
     const locked = !!(t.requiresTech && !hasSpTech(t.requiresTech.branch, t.requiresTech.tier));
-    return { key, name: t.name, color: t.color, icon: SP_TOWER_WHEEL_ICON[key] || '⚙️', cost: t.cost, locked, affordable: gold >= t.cost };
+    return { key, name: t.name, color: t.color, icon: SP_TOWER_WHEEL_ICON[key] || '🔘', iconHtml: SP_TOWER_WHEEL_ICON_HTML[key], cost: t.cost, locked, affordable: gold >= t.cost };
   });
   openBuildWheel(e.clientX, e.clientY, towerOptions).then(key => {
     if (key) trySpBuildAt(key, c, r);
@@ -571,10 +585,12 @@ function updateEffects(dt) {
     screenShake.time -= dt;
     if (screenShake.time <= 0) { screenShake.time = 0; screenShake.mag = 0; }
   }
-  // Lauf-Animation aller Gegner/Bosse (4 Frames, siehe drawWalkAnim() oben) - 150ms pro Frame, mit
-  // dem echten Frame-dt statt der Spielgeschwindigkeit.
+  // Lauf-Animation aller Gegner/Bosse (meist 4 Frames, boss_L5 hat 6, siehe SPRITE_FRAME_COUNT in
+  // spAssets.js) - 150ms pro Frame, mit dem echten Frame-dt statt der Spielgeschwindigkeit. Zähler
+  // läuft bis 12 (kgV von 4 und 6, Nachtrag 2026-08-05), der tatsächliche Frame-Index pro Sprite wird
+  // in drawWalkAnim() per `% frameCount` daraus abgeleitet.
   walkAnimAccum += dt;
-  if (walkAnimAccum >= 150) { walkAnimAccum -= 150; walkAnimFrame = (walkAnimFrame + 1) % 4; }
+  if (walkAnimAccum >= 150) { walkAnimAccum -= 150; walkAnimFrame = (walkAnimFrame + 1) % 12; }
 }
 
 function damageEnemy(enemy, dmg) {
@@ -981,14 +997,10 @@ function draw() {
       ctx.arc(e.x, drawY, e.radius, 0, Math.PI*2);
       ctx.fill();
     }
-    // Flieger-Kennzeichnung (Nachtrag): weißer Ring, exakt wie im Multiplayer bei fliegenden Einheiten.
-    if (e.flying) {
-      ctx.beginPath();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.arc(e.x, drawY, e.radius + 3 * VSCALE, 0, Math.PI*2);
-      ctx.stroke();
-    }
+    // Nachtrag (2026-08-05, auf Nutzeranfrage "der Kreis bei fliegenden Einheiten soll weg"): der
+    // weiße Flieger-Ring (früher hier, exakt wie im Multiplayer) ist entfernt - fliegende Einheiten
+    // sind über ihr Sprite bzw. das u.flying-Feld in der Spiellogik weiterhin eindeutig erkennbar,
+    // brauchten aber keine zusätzliche Ring-Markierung mehr. Analoge Entfernung in mpCore.js.
     // Schild-Kennzeichnung (Nachtrag, auf Nutzeranfrage "zeig den schild als Blauen Rahmen, leicht
     // leuchtend"): leicht leuchtender blauer Rahmen, solange shieldHits > 0 - liegt außerhalb des
     // Flieger-Rings (falls beides zutrifft, bleiben beide Ringe einzeln erkennbar).
