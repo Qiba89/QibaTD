@@ -14,6 +14,15 @@ import {
   mpDrawSprExact, MP_TOWER_SPRITE_PREFIX, mpTowerSpriteStage,
   MP_UNIT_VISUAL_KIND, MP_SPR, mpDrawSpr, mpDrawWalkAnim, mpWalkAnimFrame, mpUpdateWalkAnim
 } from './mpAssets.js';
+import { initTabsPanel } from '../shared/tabsPanel.js';
+import { openBuildWheel } from '../shared/buildWheel.js';
+
+// UI-Layout (auf Nutzeranfrage: Bedienpanels rechts neben dem Spielfeld statt
+// darunter, als Tabs statt gescrollter Liste - Variante C). Reine Optik/Interaktion,
+// keine Spiellogik - siehe js/shared/tabsPanel.js. Wird einmal beim Laden verdrahtet;
+// das ".controls"-Element ist zu diesem Zeitpunkt bereits im DOM (module-scripts
+// laufen nach vollständigem HTML-Parse).
+initTabsPanel('.controls');
 
 // Nachtrag (Balance-Fix, auf Nutzeranfrage: "das springen soll einfach zum nächsten gegner gehen
 // ohne reichweiten beschränkung"): der Kettenblitz sprang bisher nur zu fliegenden Zielen innerhalb
@@ -215,6 +224,12 @@ const APEX_INFO = {
   icecube: 'nur vom Tesla-Turm anvisierbar',
 };
 
+// Icons fürs Bau-Wheel (die Bauen-Panel-Liste nutzt stattdessen einen Farb-Swatch,
+// im runden Wheel ist ein Symbol pro Turmtyp aber besser erkennbar).
+const MP_TOWER_WHEEL_ICON = {
+  arrow: '🏹', cannon: '💣', frost: '❄️', tesla: '⚡', booster: '🔧', mine: '⛏️',
+};
+
 // ── Bau-Palette & Sende-Palette (UI) ─────────────────────────────────────
 function buildPalette() {
   const buildDiv = document.getElementById('buildButtons');
@@ -297,6 +312,21 @@ function selectBuildType(key) {
 
 function setMessage(msg) { document.getElementById('message').textContent = msg; }
 
+// Prüft Gold/Minen-Limit/Weg wie bisher und baut dann - gemeinsam genutzt vom alten
+// Bauen-Panel-Flow (erst Typ auswählen, dann Feld anklicken) und vom neuen Bau-Wheel
+// (Feld anklicken, dann Typ im Wheel wählen). Reine Extraktion, keine Verhaltensänderung
+// am bisherigen Panel-Flow.
+function tryBuildAt(key, c, r) {
+  const myStructures = isHost ? state.p1Structures : state.p2Structures;
+  if (!isBuildable(c, r)) { setMessage('Hier kann nichts gebaut werden (Weg).'); return; }
+  if (key === 'mine' && myStructures.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
+  const type = TOWER_TYPES[key];
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  if (myGold < type.cost) { setMessage('Nicht genug Gold.'); return; }
+  if (isHost) { hostBuild(key, c, r); }
+  else { queueAction({ type: 'build', buildType: key, c, r }); }
+}
+
 // ── Klick auf die eigene Spur ─────────────────────────────────────────
 document.getElementById('myCanvas').addEventListener('click', (e) => {
   if (!state || state.phase !== 'playing') return;
@@ -315,15 +345,24 @@ document.getElementById('myCanvas').addEventListener('click', (e) => {
     return;
   }
   if (selectedBuildType) {
-    if (!isBuildable(c, r)) { setMessage('Hier kann nichts gebaut werden (Weg).'); return; }
-    if (selectedBuildType === 'mine' && myStructures.filter(s => s.type === 'mine').length >= MINE_MAX_COUNT) { setMessage(`Minen-Limit erreicht (max. ${MINE_MAX_COUNT}).`); return; }
-    const type = TOWER_TYPES[selectedBuildType];
-    const myGold = isHost ? state.p1Gold : state.p2Gold;
-    if (myGold < type.cost) { setMessage('Nicht genug Gold.'); return; }
-    if (isHost) { hostBuild(selectedBuildType, c, r); }
-    else { queueAction({ type: 'build', buildType: selectedBuildType, c, r }); }
+    tryBuildAt(selectedBuildType, c, r);
     deselect();
+    return;
   }
+  // Kein Turmtyp im Panel vorgewählt: Bau-Wheel direkt am Klickpunkt öffnen
+  // (auf Nutzeranfrage: "Man klickt auf ein Feld und bekommt ein Wheel mit den
+  // Türmen zum Anklicken."). Nur auf bebaubaren Feldern, sonst wie bisher die
+  // Weg-Meldung zeigen.
+  if (!isBuildable(c, r)) { setMessage('Hier kann nichts gebaut werden (Weg).'); return; }
+  const myGold = isHost ? state.p1Gold : state.p2Gold;
+  const towers = BUILD_ORDER.map(key => {
+    const t = TOWER_TYPES[key];
+    const sub = key === 'mine' ? '+6 Gold/s' : (key === 'tesla' ? `${t.damage} Dmg · nur Luft, Kette` : `${t.damage} Dmg`);
+    return { key, name: t.name, color: t.color, icon: MP_TOWER_WHEEL_ICON[key] || '⚙️', cost: t.cost, sub, locked: false, affordable: myGold >= t.cost };
+  });
+  openBuildWheel(e.clientX, e.clientY, towers).then(key => {
+    if (key) tryBuildAt(key, c, r);
+  });
 });
 
 // Doppelklick auf einen bestehenden Turm: direkt upgraden, ohne erst das Panel zu öffnen.

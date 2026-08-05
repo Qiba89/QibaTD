@@ -10,6 +10,14 @@
 // nichts umzustrukturieren.
 import { canvas, ctx, CELL, VSCALE, COLS, ROWS, ASSET_FILES, TOWER_SPRITE_STAGE, TOWER_SPRITE_PREFIX, ENEMY_WALK_TYPES, SPR, drawSpr, drawSprExact, drawSprCover, drawWalkAnim, cellRandom } from './spAssets.js';
 import { pathCells, waypoints, pathSet, DIR_ORDER, WAY_TILE_VARIANTS, computeWaySockets, waySocketKey, ROAD_TILE_INFO } from './spGeometry.js';
+import { openBuildWheel } from '../shared/buildWheel.js';
+
+// Icons fürs Bau-Wheel (die Bauen-Panel-Liste nutzt stattdessen einen Farb-Swatch,
+// im runden Wheel ist ein Symbol pro Turmtyp aber besser erkennbar) - analog zu
+// MP_TOWER_WHEEL_ICON in mpCore.js.
+const SP_TOWER_WHEEL_ICON = {
+  arrow: '🏹', cannon: '💣', frost: '❄️', booster: '🔧', tesla: '⚡', titan: '🗿',
+};
 
 (function(){
 
@@ -219,6 +227,42 @@ function setMessage(msg) {
   document.getElementById('spMessage').textContent = msg;
 }
 
+// Prüft Weg/Footprint/Tech/Gold wie bisher und baut dann - gemeinsam genutzt vom alten
+// Panel-Flow (erst Typ auswählen, dann Feld anklicken) und vom neuen Bau-Wheel (Feld
+// anklicken, dann Typ im Wheel wählen). Reine Extraktion, keine Verhaltensänderung am
+// bisherigen Panel-Flow.
+function trySpBuildAt(key, c, r) {
+  const type = SP_TOWER_TYPES[key];
+  const footprint = type.footprint || 1;
+  if (footprint > 1) {
+    if (!isBuildableFootprint(c, r, footprint)) { setMessage(`Hier passt kein ${footprint}×${footprint}-Feld-Turm hin (Weg, Rand oder schon belegt).`); return; }
+  } else if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
+  if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button/Wheel-Segment ist ohnehin versteckt/gesperrt
+  if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
+  gold -= type.cost;
+  // Nachtrag (Aura-Türme: Frost-Aura + Booster-Turm, `kind: 'aura''): bekommen keine Kampfwerte
+  // (baseDamage/baseFireRate/baseSplash/projSpeed) - sie feuern nie, effectiveDamage/-FireRate
+  // würden mit undefined-Basiswerten sonst NaN liefern. baseRange bleibt für BEIDE Turmarten
+  // erhalten, da er jetzt universell "Wirkungsradius" bedeutet (Angriffsreichweite bei kämpfenden
+  // Türmen, Aura-Radius bei Frost/Booster) und über dieselbe effectiveRange()-Tier-Skalierung wächst.
+  const isAura = type.kind === 'aura';
+  towers.push({
+    // (c,r) ist bei footprint>1 die obere linke Zelle des belegten Blocks (siehe towerCells()
+    // oben); x/y liegen entsprechend in der Mitte des GESAMTEN Blocks, nicht nur einer Zelle.
+    c, r, footprint, x: c*CELL + (footprint*CELL)/2, y: r*CELL + (footprint*CELL)/2,
+    type: key, color: type.color, cost: type.cost, tier: 0, cooldown: 0,
+    groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
+    baseRange: type.range,
+    ...(isAura ? { slow: type.slow } : {
+      baseDamage: type.damage, baseFireRate: type.fireRate, baseSplash: type.splash || 0,
+      projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
+      priority: 'first',
+    }),
+  });
+  deselectTower();
+  updateStats();
+}
+
 canvas.addEventListener('click', (e) => {
   if (gameOver) return;
   const rect = canvas.getBoundingClientRect();
@@ -236,36 +280,21 @@ canvas.addEventListener('click', (e) => {
   }
 
   if (selectedTowerType) {
-    const type = SP_TOWER_TYPES[selectedTowerType];
-    const footprint = type.footprint || 1;
-    if (footprint > 1) {
-      if (!isBuildableFootprint(c, r, footprint)) { setMessage(`Hier passt kein ${footprint}×${footprint}-Feld-Turm hin (Weg, Rand oder schon belegt).`); return; }
-    } else if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
-    if (type.requiresTech && !hasSpTech(type.requiresTech.branch, type.requiresTech.tier)) { deselectTower(); return; } // Sicherheitsnetz, Button ist ohnehin versteckt
-    if (gold < type.cost) { setMessage('Nicht genug Gold.'); return; }
-    gold -= type.cost;
-    // Nachtrag (Aura-Türme: Frost-Aura + Booster-Turm, `kind: 'aura''): bekommen keine Kampfwerte
-    // (baseDamage/baseFireRate/baseSplash/projSpeed) - sie feuern nie, effectiveDamage/-FireRate
-    // würden mit undefined-Basiswerten sonst NaN liefern. baseRange bleibt für BEIDE Turmarten
-    // erhalten, da er jetzt universell "Wirkungsradius" bedeutet (Angriffsreichweite bei kämpfenden
-    // Türmen, Aura-Radius bei Frost/Booster) und über dieselbe effectiveRange()-Tier-Skalierung wächst.
-    const isAura = type.kind === 'aura';
-    towers.push({
-      // (c,r) ist bei footprint>1 die obere linke Zelle des belegten Blocks (siehe towerCells()
-      // oben); x/y liegen entsprechend in der Mitte des GESAMTEN Blocks, nicht nur einer Zelle.
-      c, r, footprint, x: c*CELL + (footprint*CELL)/2, y: r*CELL + (footprint*CELL)/2,
-      type: selectedTowerType, color: type.color, cost: type.cost, tier: 0, cooldown: 0,
-      groundOnly: !!type.groundOnly, airOnly: !!type.airOnly,
-      baseRange: type.range,
-      ...(isAura ? { slow: type.slow } : {
-        baseDamage: type.damage, baseFireRate: type.fireRate, baseSplash: type.splash || 0,
-        projSpeed: type.projSpeed, slow: type.slow, slowDuration: type.slowDuration,
-        priority: 'first',
-      }),
-    });
-    deselectTower();
-    updateStats();
+    trySpBuildAt(selectedTowerType, c, r);
+    return;
   }
+
+  // Kein Turmtyp im Panel vorgewählt: Bau-Wheel direkt am Klickpunkt öffnen, analog zum
+  // Multiplayer (js/shared/buildWheel.js). Gesperrte Türme (requiresTech, z.B. Titan)
+  // erscheinen ausgegraut mit Schloss-Symbol statt komplett zu fehlen.
+  if (!isBuildable(c, r)) { setMessage('Hier kann kein Turm gebaut werden.'); return; }
+  const towerOptions = Object.entries(SP_TOWER_TYPES).map(([key, t]) => {
+    const locked = !!(t.requiresTech && !hasSpTech(t.requiresTech.branch, t.requiresTech.tier));
+    return { key, name: t.name, color: t.color, icon: SP_TOWER_WHEEL_ICON[key] || '⚙️', cost: t.cost, locked, affordable: gold >= t.cost };
+  });
+  openBuildWheel(e.clientX, e.clientY, towerOptions).then(key => {
+    if (key) trySpBuildAt(key, c, r);
+  });
 });
 
 // Doppelklick auf einen bestehenden Turm: direkt upgraden, ohne erst das Panel zu öffnen

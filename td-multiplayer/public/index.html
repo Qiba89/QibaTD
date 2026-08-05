@@ -88,6 +88,35 @@
   }
 
   #game { display: none; flex-direction: column; align-items: center; width: 100%; }
+  /* Tab-Leiste über den Bauen/Einheiten/Tech-Panels (Variante C, auf Nutzeranfrage) -
+     gilt für alle Fensterbreiten, da die Tab-Umschaltung (js/shared/tabsPanel.js)
+     unabhängig vom Sidebar-Grid-Layout unten funktioniert. */
+  .controls-tabs { display: flex; gap: 4px; margin-bottom: 8px; width: 100%; flex: 0 0 100%; }
+  .ctab {
+    flex: 1; padding: 8px 4px; border-radius: 8px 8px 0 0; border: 1px solid #2c333c;
+    border-bottom: none; background: #1b2129; color: #aab3bd; font-size: 12px; font-weight: 700;
+    cursor: pointer;
+  }
+  .ctab.active { background: var(--panel); color: var(--accent2); border-color: var(--accent2); }
+  @media (min-width: 1650px) {
+    #game.layout-sidebar {
+      display: grid !important;
+      grid-template-columns: 1360px 240px;
+      column-gap: 16px;
+      align-items: start;
+      justify-content: center;
+    }
+    #game.layout-sidebar > #connStatus,
+    #game.layout-sidebar > #readyScreen,
+    #game.layout-sidebar > .stat-bars,
+    #game.layout-sidebar > #bossTimerBar { grid-column: 1 / -1; }
+    #game.layout-sidebar .lanes { grid-column: 1; margin-bottom: 0; }
+    #game.layout-sidebar .controls {
+      grid-column: 2; flex-direction: column; max-width: none; width: 240px;
+      max-height: 832px; display: flex;
+    }
+    #game.layout-sidebar .panel { width: 100%; overflow-y: auto; flex: 1; min-height: 0; }
+  }
 
   .stat-bars { display: flex; gap: 12px; margin-bottom: 12px; width: 100%; max-width: 720px; }
   .stat-card { flex: 1; background: var(--panel); border-radius: 8px; padding: 8px 14px; font-size: 14px; border: 1px solid #2c333c; }
@@ -494,7 +523,7 @@
   </div>
 </div>
 
-<div id="game">
+<div id="game" class="layout-sidebar">
   <div id="connStatus">Verbinde…</div>
 
   <div id="readyScreen" style="display:none;">
@@ -530,7 +559,12 @@
   </div>
 
   <div class="controls" style="display:none;">
-    <div class="panel">
+    <div class="controls-tabs">
+      <button class="ctab active" data-tab="build">🏗️ Bauen</button>
+      <button class="ctab" data-tab="send">🎯 Einheiten</button>
+      <button class="ctab" data-tab="tech">🔧 Tech</button>
+    </div>
+    <div class="panel" data-tab="build">
       <h3>Bauen (deine Seite)</h3>
       <button class="sell-all-btn" id="sellAllBtn" onclick="sellAllTowers()">🗑 Alle Türme verkaufen</button>
       <div id="buildButtons"></div>
@@ -550,11 +584,11 @@
         </div>
       </div>
     </div>
-    <div class="panel">
+    <div class="panel" data-tab="send" style="display:none;">
       <h3>Einheiten schicken</h3>
       <div id="sendButtons"></div>
     </div>
-    <div class="panel">
+    <div class="panel" data-tab="tech" style="display:none;">
       <h3>🔧 Tech-Tree (<span id="techPointsLabel">0</span> Punkte)</h3>
       <button class="action-btn" id="buyTechPointBtn" onclick="buyTechPoint()"></button>
       <div id="techTree"></div>
